@@ -101,6 +101,7 @@
     - Return an associative array of the total solution count and the mine count array with corresponding indicies to the unknown value array 
 
 ##### 7. `apply_rules()`
+
 - A constraint says (locally or globally) that a certain set of cells ther are a certain amount of mines
 - Singles: 
     - if there are no mines, all the cells are considered safe
@@ -128,6 +129,7 @@ This is found in `frontier.oy` so that it can be ran while the program is runnin
 ##### 2. Board Invariants 
 
 Warning: There are several tests that can run during in game play to verify invariants.  Some of these might affect a user's game so the `invariants` mode should only be used if they want a very verfied level of assurance. 
+
     - total mines <= total unknowns 
     - the adjacent mines numbers must match the number af adjacent mines
     - mines cannot be revelaed ever besides the end (they may be revealed, though)
@@ -138,6 +140,7 @@ Warning: There are several tests that can run during in game play to verify inva
 ##### 3. Solve Invariants 
 
 Warning: There are several tests that can run during in game play to verify invariants.  Some of these might affect a user's game so the `invariants` mode should only be used if they want a very verfied level of assurance. 
+
     - if the invariants mode is turned on, the tests are completed which check the probability sums with the known mine counts. These verify: 
         - The location already being revealed or flagged
         - The mine probability being 0.0 (a safe spot) but a mine in the location (conflicting with the user's flag location possibly but this is for invariants mode only)
