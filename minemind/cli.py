@@ -5,7 +5,7 @@ import argparse
  
 from core.snapshot import save_snapshot, load_snapshot
 from core.config import config  
-from .game import Game
+from minemind.game import Game
 
 
 PROMPT = "minemind> "
@@ -166,7 +166,6 @@ def _parse_rc(args, usage: str):
 
 
 def _print_moves(moves, verbose=False): 
-    
     if len(moves) == 1: 
         move = moves[0] 
         if verbose:
@@ -212,8 +211,16 @@ def cmd_open(g: Game, args):
         if not opened:
             print("open did not succeed... please restart program\n")
             return
-    
-        print(opened) 
+
+        r = len(opened.revealed)
+        
+        if r == 0: 
+            print(f"revealed: {r} cells") 
+        elif r == 1: 
+            print(f"revealed: {r} cell") 
+        else:
+            print(f"revealed: {r} cells") 
+
         print()
         g.render_board()
         g.is_winner()
@@ -260,11 +267,13 @@ def cmd_chord(g: Game, args):
     try:
         chord = g.solver.chord(r, c)  
         
-        if len(chord) == 0:
+        print(chord) 
+        
+        if len(chord.revealed) == 0:
             print("chord found no cells to reveal for you\n")
             return
 
-        for r, c in chord:
+        for r, c in chord.revealed:
             print(f"chord: r={r},c={c}")
 
         print()

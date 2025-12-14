@@ -1,7 +1,7 @@
 # canonical component signature 
  
 from typing import Tuple
-from .frontier import Component  
+from analysis.frontier.component import Component  
 
 # Signature = (k, (sorted_masks...), (sorted_remaining...))
 Signature = Tuple[int, Tuple[int, ...], Tuple[int, ...]]

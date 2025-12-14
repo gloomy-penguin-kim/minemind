@@ -13,11 +13,13 @@ from datetime import datetime
 from heapq import heappop, heappush
 from typing import Dict, List, Tuple, Any
 
-from core.frontier import build_frontier
-from core.rules import apply_rules
+from analysis.frontier.frontier import build_frontier
+from analysis.rules.rules import apply_rules
+from analysis.queries.chords import chords 
+from core.changes import Action, ChangeSet
 from core.lru import LRUCache
 from core.signatures import Signature, component_signature
-from core.move import SAFE, MINE, UNKNOWN, CHORD, FLAG, OPEN, GUESS, STEP, Move
+from analysis.rules.move import SAFE, MINE, UNKNOWN, CHORD, FLAG, OPEN, GUESS, STEP, Move
 from core.utility import get_indicies_from_bitmask 
 from core.config import config 
 
@@ -61,115 +63,78 @@ class Solver:
         self.frontier_components = build_frontier(self.board)  
 
 
-    def open(self, x, y): 
+    def open(self, r, c): 
         """
         cli command for open 
         """
-        first = not self.board.mines_placed
-        move = Move(x, y, kind=OPEN)
-        effected = self._apply_move(move)  
-        if len(effected) == 0: 
-            return None 
-        elif first:
-            self.verify_and_history(moves=effected, note=f"OPEN {x},{y}")
-            return move
-        self.verify_and_history(moves=effected, note=f"OPEN {x},{y}") 
-        return move
+        return self.board.apply(Action.OPEN, r, c)
+        # first = not self.board.mines_placed
+        # move = Move(x, y, kind=OPEN)
+        # effected = self._apply_move(move)  
+        # if len(effected) == 0: 
+        #     return None 
+        # elif first:
+        #     self.verify_and_history(moves=effected, note=f"OPEN {x},{y}")
+        #     return move
+        # self.verify_and_history(moves=effected, note=f"OPEN {x},{y}")  
 
 
-    def flag(self, x, y):
+    def flag(self, r, c):
         """
         cli command for flag... toggle  
         """
-        if not self.verify_board(): 
-            return None 
-        move = Move(x, y, kind=FLAG) 
-        effected = self._apply_move(move)
-        if len(effected) == 0: 
-            return None  
-        self.verify_and_history(moves=effected, note=f"FlaG {x},{y}")
-        return move 
+        return self.board.apply(Action.FLAG, r, c)
+    
 
-    # TODO: check chord to see if the cell is returned for len(effected) == 1 
-    def chord(self, x, y): 
+    def chord(self, r, c): 
         """
         cli command for chord 
         """
-        if not self.verify_board(): 
-            return None  
-        move = Move(x, y, kind=CHORD) 
-        effected = self._apply_move(move)
-        if len(effected) == 0: 
-            return []   
-        self.verify_and_history(moves=effected, note=f"CHORD {x},{y}")
-        return effected  
+        return self.board.chord(r,c) 
     
 
-    def chords(self) -> list[tuple[int,int]]:
-        b = self.board
-        if b.game_over or not b.mines_placed:
-            return []
-
-        moves = []
-        for r in range(b.rows):
-            for c in range(b.cols):
-                if not b.revealed[r][c]:
-                    continue
-                n = b.adj[r][c]
-                if n <= 0:
-                    continue
-
-                flagged = 0
-                unknown = 0
-                for nr, nc in b.neighbors(r, c):
-                    if b.flagged[nr][nc]:
-                        flagged += 1
-                    elif not b.revealed[nr][nc]:
-                        unknown += 1
-
-                if flagged == n and unknown > 0:
-                    moves.append((r, c))
-
-        return moves
-
-    
+    def chords(self) -> list[tuple[int,int]]: 
+        return chords(self.board)
     
 
     def step(self, guess: bool = False):
         """
         Perform a single logical step.
         If guess=True and no deterministic move exists, make one guess.
-        """
-        if not self.verify_board():
-            return None, None
+        """ 
 
-        conflicts_arr: List[Any] = []
-
-        # Deterministic rules first
-        for comp in self.frontier_components or []:
-            moves, conflicts = apply_rules(comp, self.board, stop_after_one=True)
-            if conflicts:
-                conflicts_arr.extend(conflicts)
-            if len(moves) > 0:
-                move = moves[0]
-                ec = self._apply_move(move)
-                if len(ec) > 0:
-                    r, c, _, _ = move.var()
-                    self.verify_and_history(moves=ec, note=f"STEP r={r},c={c}")
-                    return move, conflicts_arr
-                return False, conflicts_arr
-
+        # Deterministic rules first 
+        move = apply_rules(self.frontier_components, 
+                            self.board, 
+                            stop_after_one=True, 
+                            conflicts_only=False) 
+        if move: 
+            cs = self.apply_move(move)
+            if cs: 
+                return cs 
 
         # No deterministic move
         if not guess:
-            return False, conflicts_arr
+            return False
 
         # Fallback to a single guess from heap
         guess_moves, _ = self._heap(apply=True)
         if not guess_moves:
-            return False, conflicts_arr
+            return False
 
-        return guess_moves[0], conflicts_arr
+        return guess_moves[0]
+    
+
+    # def step(self, guess=False):
+    #     comps = build_frontier(self.board)
+    #     move  = apply_rules(comps, self.board, stop_after_one=True)
+    #     if move:
+    #         return self.board.apply(move.action, move.r, move.c)
+    #     if guess:
+    #         g = best_guess(self.board, comps)
+    #         if g:
+    #             return self.board.apply(g.action, g.r, g.c)
+    #     return None
 
 
     def verify(self):
@@ -181,28 +146,28 @@ class Solver:
         return self.board.verify_all_existing_flags_found()  
     
 
-    def hint(self):
+    def hint(self, guess=False):
         """
         Return a suggested move without applying it.
         Prefer deterministic rules; fall back to probability-based guess.
         """
         if not self.verify_board():
             return None
-
-        conflicts_arr: List[Any] = []
-
-        for comp in self.frontier_components or []:
-            moves, conflicts = apply_rules(comp, self.board, stop_after_one=True)
-            if conflicts:
-                conflicts_arr.extend(conflicts)
-            if len(moves) > 0:
-                # i really want to see all the hints listed out, though of known rules  
-                return [moves[0]], conflicts_arr
  
-        # the specifications say to return just deterministic hints but it would be 
-        # so easy to allow for probabilistic hints to be sent as well 
-        # moves,_ = self._heap(apply=False) 
-        return [], conflicts_arr
+        move = apply_rules(self.frontier_components, 
+                           self.board, 
+                           stop_after_one=True, 
+                           conflicts_only=False)
+         
+        if move:
+            return move 
+        
+        if guess:
+            g = self._heap(self.board, self.frontier_components)
+            if g:
+                return g 
+            
+        return None 
 
 
     def auto(self, guess: bool=False, limit: int | None = None):
@@ -566,28 +531,7 @@ class Solver:
 
 
     def _apply_move(self, move: Move): 
-        if self.board.game_over: return []
-        if config.invariants: 
-            remaining_unknown_count_antes = self.board.count_unkown_cells() 
-        r, c, kind, _ = move.var() 
- 
-        if kind in (SAFE, OPEN, STEP):
-            effected_cells = self.board.reveal_cell(r, c)
-        elif kind == MINE:
-            effected_cells = self.board.set_flag(r, c, True)
-        elif kind == FLAG:
-            effected_cells = self.board.toggle_flag(r, c) 
-        elif kind == CHORD: 
-            effected_cells = self.board.chord(r, c) 
- 
-        effected_cells = list(set(effected_cells))
-
-        if config.invariants: 
-            remaining_unknown_count_despues = self.board.count_unkown_cells() 
-            if abs(remaining_unknown_count_antes - remaining_unknown_count_despues) != len(effected_cells):  
-                raise AssertionError("cells have been modified outside of reported scope in solver._apply_move()")
-        return effected_cells
-        
+        return self.board.apply(move.action, move.r, move.c)
 
     def verify_and_history(self, moves, note, count=1):   
         logger.debug("moves: %s", moves)  

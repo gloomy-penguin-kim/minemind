@@ -1,14 +1,17 @@
-import copy
-from datetime import datetime
 from typing import List, Tuple, Iterable, Any
 
+from core.changes import ChangeSet, Action 
 from core.generator import generate_board
 from core.config import config 
 
+from dataclasses import dataclass
+from typing import Set, Tuple
+
 import logging
 
-logger = logging.getLogger(__name__)
+from analysis.rules.move import CHORD, MINE, OPEN, SAFE, STEP, Move
 
+# logger = logging.getLogger(__name__) 
 
 class Board:
     def __init__(self, rows: int, cols: int, num_mines: int, seed: int = 0, invariants: bool = True) -> None:
@@ -31,6 +34,8 @@ class Board:
 
         self._remaining_safe: int = rows * cols - num_mines  
 
+        self._undo_stack: list[ChangeSet] = [] 
+    
 
     def neighbors(self, r: int, c: int) -> Iterable[Tuple[int, int]]:
         """Yield all valid neighbor coordinates of (r, c)."""
@@ -60,49 +65,111 @@ class Board:
         self.adj = adj
         self.mines_placed = True
 
-    def reveal_cell(self, r: int, c: int) -> List[Tuple[int, int]]:
-        """Reveal a cell and flood-fill if safe; return list of changed cells."""
-        if self.game_over:
-            return []
-        if self.revealed[r][c]:
-            return []
-        if self.flagged[r][c]:
-            return []
 
-        if config.invariants:
-            before = self.count_unkown_cells()
+    def apply(self, action: Action, r: int, c: int) -> ChangeSet:
+        """
+        The only place that mutates board state.
+        """
+        before_revealed = set()
+        before_flagged = set()
 
-        # first click opens the board
+        # snapshot old state for diff
+        for i in range(self.rows):
+            for j in range(self.cols):
+                if self.revealed[i][j]:
+                    before_revealed.add((i, j))
+                if self.flagged[i][j]:
+                    before_flagged.add((i, j))
+
+        if action == Action.OPEN:
+            self.reveal_cell(r, c)
+        elif action == Action.FLAG:
+            self.toggle_flag(r, c)
+        elif action == Action.CHORD:
+            self.chord(r, c)
+
+        # compute diffs
+        after_revealed = {
+            (i, j)
+            for i in range(self.rows)
+            for j in range(self.cols)
+            if self.revealed[i][j]
+        }
+        after_flagged = {
+            (i, j)
+            for i in range(self.rows)
+            for j in range(self.cols)
+            if self.flagged[i][j]
+        }
+
+        return ChangeSet(
+            revealed=after_revealed - before_revealed,
+            flagged=after_flagged - before_flagged,
+            game_over=self.game_over,
+            win=self.win,
+        )
+
+    def _apply_move(self, move: Move) -> ChangeSet | None:
+        r, c, kind, _ = move.var()
+
+        if kind in (SAFE, OPEN, STEP):
+            return self.board.apply(Action.OPEN, r, c)
+        elif kind == MINE:
+            return self.board.apply(Action.FLAG, r, c)
+        elif kind == CHORD:
+            return self.board.apply(Action.CHORD, r, c)
+
+        return None
+    
+
+    def undo(self) -> bool:
+        if not self._undo_stack:
+            return False
+
+        changes = self._undo_stack.pop()
+
+        for r, c in changes.revealed:
+            self.revealed[r][c] = False
+            self._remaining_safe += 1
+
+        for r, c in changes.flagged:
+            self.flagged[r][c] = False
+
+        self.game_over = False
+        self.win = False
+        return True
+        
+
+    def reveal_cell(self, r: int, c: int) -> ChangeSet:
+        cs = ChangeSet()
+
+        if self.game_over or self.revealed[r][c] or self.flagged[r][c]:
+            return cs
+
         if not self.mines_placed:
-            self.build_board(first_r=r, first_c=c)
+            self.build_board(r, c)
 
-        # mine click ends the game
         if self.is_mine[r][c]:
             self.revealed[r][c] = True
+            cs.revealed.add((r, c))
             self.game_over = True
             self.win = False
-            changed = [(r, c)]
-            return changed
+            cs.game_over = True
+            return cs
 
-        # safe: flood fill + check win
-        changed = self._flood_reveal(r, c)               
-        changed += self._check_win_condition()           
+        cs.revealed |= self._flood_reveal(r, c)
 
-        if config.invariants:
-            after = self.count_unkown_cells()
-            if abs(before - after) != len(set(changed)):
-                raise AssertionError(
-                    f"before_uknown_cells - after_unknown_cells != effected_cells, "
-                    f"{before} - {after} != {len(set(changed))}"
-                )
+        win_cs = self._check_win_condition()
+        cs.flagged |= win_cs.flagged
+        cs.game_over = win_cs.game_over
+        cs.win = win_cs.win
 
-        return changed
+        return cs 
 
-
-    def _flood_reveal(self, r: int, c: int) -> List[Tuple[int, int]]:
-        """Flood-reveal connected safe region starting at (r, c)."""
-        changed: List[Tuple[int, int]] = []
-        stack: List[Tuple[int, int]] = [(r, c)]
+ 
+    def _flood_reveal(self, r: int, c: int) -> set[tuple[int,int]]:
+        revealed = set()
+        stack = [(r, c)]
 
         while stack:
             cr, cc = stack.pop()
@@ -115,117 +182,92 @@ class Board:
                 continue
 
             self.revealed[cr][cc] = True
+            revealed.add((cr, cc))
             self._remaining_safe -= 1
-            changed.append((cr, cc))
 
             if self.adj[cr][cc] == 0:
                 for nr, nc in self.neighbors(cr, cc):
-                    if not self.revealed[nr][nc] and not self.flagged[nr][nc] and not self.is_mine[nr][nc]:
+                    if not self.revealed[nr][nc] and not self.flagged[nr][nc]:
                         stack.append((nr, nc))
 
-        return changed
+        return revealed
 
 
-    def _check_win_condition(self) -> List[Tuple[int, int]]:
-        if self.game_over:
-            return []
+    def _check_win_condition(self) -> ChangeSet:
+        cs = ChangeSet()
 
-        changed: List[Tuple[int, int]] = []
+        if self._remaining_safe <= 0 and not self.game_over:
+            for i in range(self.rows):
+                for j in range(self.cols):
+                    if not self.revealed[i][j] and not self.flagged[i][j]:
+                        self.flagged[i][j] = True
+                        cs.flagged.add((i, j))
 
-        # Win by revealing all safe cells
-        if self._remaining_safe <= 0:
             self.win = True
             self.game_over = True
+            cs.win = True
+            cs.game_over = True
 
-        else:
-            # Win by correctly flagging all mines (and no wrong flags)
-            # Only valid after mines are placed
-            if self.mines_placed:
-                correct = 0
-                wrong = 0
-                total_flags = 0
-                for r in range(self.rows):
-                    for c in range(self.cols):
-                        if self.flagged[r][c]:
-                            total_flags += 1
-                            if self.is_mine[r][c]:
-                                correct += 1
-                            else:
-                                wrong += 1
-                if wrong == 0 and correct == self.num_mines and total_flags == self.num_mines:
-                    self.win = True
-                    self.game_over = True
-
-        # optional: auto-flag remaining unrevealed if you want the nice “finish”
-        if self.game_over and self.win:
-            for r in range(self.rows):
-                for c in range(self.cols):
-                    if not self.revealed[r][c] and not self.flagged[r][c]:
-                        self.flagged[r][c] = True
-                        changed.append((r, c))
-
-        return changed
+        return cs
 
 
-    def toggle_flag(self, r: int, c: int) -> Tuple[int, int] | tuple:
-        """Toggle a flag at (r, c).""" 
+    def toggle_flag(self, r: int, c: int) -> ChangeSet:
+        cs = ChangeSet()
 
+        if self.game_over:
+            return cs
         if self.revealed[r][c]:
-            return []
+            return cs
+
+        self.flagged[r][c] = not self.flagged[r][c]
+        cs.flagged.add((r, c))
+
+        # merge in win-condition changes (auto-flagging)
+        win_cs = self._check_win_condition()
+        cs.flagged |= win_cs.flagged
+        cs.game_over = win_cs.game_over
+        cs.win = win_cs.win
+
+        return cs 
+    
+
+    def chord(self, r: int, c: int) -> ChangeSet:
+        cs = ChangeSet()
+
         if self.game_over:
-            return []
-        
-        self.flagged[r][c] = not self.flagged[r][c] 
-        
-        cells = [(r,c)]
-        cells += self._check_win_condition() 
-
-        return cells 
-
-
-    def set_flag(self, r: int, c: int, val: bool) -> Tuple[int, int]: 
-        """Set flag value at (r, c) to val.""" 
-        if self.revealed[r][c]: 
-            return []
-        if self.flagged[r][c] == val: 
-            return []
-        if self.game_over: 
-            return [] 
-        self.flagged[r][c] = val 
-
-        cells = [(r,c)]
-        cells += self._check_win_condition() 
-
-        return cells 
-
-
-    def chord(self, r: int, c: int) -> List[Tuple[int, int]]:
-        """
-        On a revealed number, if flagged neighbors equal that number,
-        reveal remaining unknown neighbors.
-        """
-        if self.game_over:
-            return []
+            return cs
         if not self.revealed[r][c]:
-            return []
+            return cs
+
         num_mines = self.adj[r][c]
         if num_mines <= 0:
-            return []
+            return cs
 
         flagged = 0
-        unknowns: List[Tuple[int, int]] = []
+        unknowns: list[tuple[int,int]] = []
+
         for nr, nc in self.neighbors(r, c):
             if self.flagged[nr][nc]:
                 flagged += 1
-            elif not self.revealed[nr][nc] and not self.flagged[nr][nc]:
+            elif not self.revealed[nr][nc]:
+                # if it's not revealed and not flagged, it's an unknown candidate
                 unknowns.append((nr, nc))
 
-        cells: List[Tuple[int, int]] = []
-        if flagged == num_mines:
-            for nr, nc in unknowns:
-                cells += self.reveal_cell(nr, nc)
+        if flagged != num_mines:
+            return cs
 
-        return cells
+        # reveal all chord-opened neighbors
+        for nr, nc in unknowns:
+            sub = self.reveal_cell(nr, nc)   # ChangeSet
+            cs.revealed |= sub.revealed
+            cs.flagged  |= sub.flagged
+            cs.game_over = cs.game_over or sub.game_over
+            cs.win = cs.win or sub.win
+            if cs.game_over:  # optional short-circuit
+                break
+
+        return cs
+
 
 
     def chords(self) -> List[Tuple[int, int]]:
@@ -300,7 +342,6 @@ class Board:
         self._remaining_safe = (self.rows * self.cols - self.num_mines) - self.count_revealed_cells()
 
 
-
     # ---------------- Debug helpers ----------------
 
 
@@ -347,8 +388,7 @@ class Board:
                 if self.is_mine[i][j] and self.flagged[i][j]:
                     total_mines += 1
                 if not self.revealed[i][j]:
-                    total_unknown += 1
-        logger.debug("total_mines(%s) <= total_unknown(%s)", total_mines, total_unknown)
+                    total_unknown += 1 
         if total_mines > total_unknown:
             raise AssertionError(
                 f"total_mines({total_mines}) > total_unknown({total_unknown})"

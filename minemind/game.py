@@ -1,7 +1,7 @@
 from core.board import Board
-from core.solver import Solver
+from solver.solver import Solver
 from minemind.timer import Timer
-from .render import render_board, render_prob_heatmap, render_frontier 
+from minemind.render import render_board, render_prob_heatmap, render_frontier 
 
 
 class Game:

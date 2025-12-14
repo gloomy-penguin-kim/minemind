@@ -5,7 +5,7 @@ import hashlib
 from datetime import datetime 
 
 from core.board import Board 
-from core.solver import Solver 
+from solver.solver import Solver 
 from minemind.timer import Timer 
 from minemind.render import render_board
 
