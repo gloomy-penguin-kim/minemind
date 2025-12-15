@@ -1,5 +1,5 @@
 
-def chords(b) -> list[tuple[int,int]]: 
+def find_chords(b) -> list[tuple[int,int]]: 
     if b.game_over or not b.mines_placed:
         return []
 

@@ -14,12 +14,14 @@ from heapq import heappop, heappush
 from typing import Dict, List, Tuple, Any
 
 from analysis.frontier.frontier import build_frontier
+from analysis.probability.enumeration import ProbabilityEngine 
+from analysis.probability.guess import best_guess
 from analysis.rules.rules import apply_rules
-from analysis.queries.chords import chords 
+from analysis.queries.chords import find_chords 
 from core.changes import Action, ChangeSet
 from core.lru import LRUCache
 from core.signatures import Signature, component_signature
-from analysis.rules.move import SAFE, MINE, UNKNOWN, CHORD, FLAG, OPEN, GUESS, STEP, Move
+from analysis.rules.move import MoveKind, Move
 from core.utility import get_indicies_from_bitmask 
 from core.config import config 
 
@@ -46,6 +48,8 @@ class Solver:
         self.sig_cache = LRUCache(cache_size)
 
         self.frontier_components = None  # cached frontier 
+
+        self.prob_engine = ProbabilityEngine(max_k=self.max_k, cache_size=cache_size)
 
         self.history = [] 
 
@@ -94,55 +98,32 @@ class Solver:
     
 
     def chords(self) -> list[tuple[int,int]]: 
-        return chords(self.board)
+        return find_chords(self.board)
     
-
-    def step(self, guess: bool = False):
+ 
+    def step(self, guess=False):
         """
         Perform a single logical step.
         If guess=True and no deterministic move exists, make one guess.
         """ 
+        comps = build_frontier(self.board)
+        move  = apply_rules(comps, self.board, stop_after_one=True)
 
-        # Deterministic rules first 
-        move = apply_rules(self.frontier_components, 
-                            self.board, 
-                            stop_after_one=True, 
-                            conflicts_only=False) 
-        if move: 
-            cs = self.apply_move(move)
-            if cs: 
-                return cs 
-
-        # No deterministic move
-        if not guess:
-            return False
-
-        # Fallback to a single guess from heap
-        guess_moves, _ = self._heap(apply=True)
-        if not guess_moves:
-            return False
-
-        return guess_moves[0]
-    
-
-    # def step(self, guess=False):
-    #     comps = build_frontier(self.board)
-    #     move  = apply_rules(comps, self.board, stop_after_one=True)
-    #     if move:
-    #         return self.board.apply(move.action, move.r, move.c)
-    #     if guess:
-    #         g = best_guess(self.board, comps)
-    #         if g:
-    #             return self.board.apply(g.action, g.r, g.c)
-    #     return None
+        if move:
+            return self.board.apply(move.action, move.r, move.c)
+        
+        if guess:
+            g = best_guess(self.board, comps)
+            if g:
+                return self.board.apply(g.action, g.r, g.c)
+            
+        return None
 
 
     def verify(self):
         """
         cli command verify... to verify existing flags if they are mines or not 
-        """
-        if not self.verify_board(): 
-            return None    
+        """  
         return self.board.verify_all_existing_flags_found()  
     
 
@@ -151,19 +132,14 @@ class Solver:
         Return a suggested move without applying it.
         Prefer deterministic rules; fall back to probability-based guess.
         """
-        if not self.verify_board():
-            return None
- 
-        move = apply_rules(self.frontier_components, 
-                           self.board, 
-                           stop_after_one=True, 
-                           conflicts_only=False)
+        comps = build_frontier(self.board)
+        move  = apply_rules(comps, self.board, stop_after_one=True)
          
         if move:
             return move 
         
         if guess:
-            g = self._heap(self.board, self.frontier_components)
+            g = best_guess(self.board, comps)
             if g:
                 return g 
             
@@ -253,223 +229,9 @@ class Solver:
                       
 
     def prob(self) -> Tuple[Dict[Tuple[int, int], float], List[Tuple[float, int, float, float, Tuple[int, int]]]]:
-        """Compute per-cell mine probabilities and build a guess heap."""
-        self.verify_board()
-
-        logger.debug("\nstart of probabilities")
-
-        board = self.board
-        rows, cols = board.rows, board.cols
-
-        all_probs: Dict[Tuple[int, int], float] = {}
-        heap: List[Tuple[float, int, float, float, Tuple[int, int]]] = []
-
         self.refresh_frontier() 
+        return enumeration(self.board, self.frontier_components)
 
-        for comp in self.frontier_components or []:
-            res = self._get_probabilities(comp)
-            if res is None:
-                # component too large; skip
-                logger.debug("component is too large, this is skipped, %s", comp.k)
-                logger.debug("component: %s", comp )
-                continue
-
-            solutions = res["solutions"]
-            if solutions == 0:
-                continue
-
-            mine_counts = res["mine_counts"]
-
-            if config.invariants:
-                mines_in_component = self.board.test_get_remaining_mines_per_component(comp.local_to_global)
-
-            for i, global_index in enumerate(comp.local_to_global):
-                r, c = divmod(global_index, cols)
-
-                if board.revealed[r][c] or board.flagged[r][c]:
-                    continue
-
-                p = mine_counts[i] / solutions
-                all_probs[(r, c)] = p
-
-                if config.invariants:
-                    self.test_invariantes_of_the_mines(p, mines_in_component, r, c, comp.k)
-
-                # tiebreaker: prefer central cells
-                dr = r - (rows - 1) / 2.0
-                dc = c - (cols - 1) / 2.0
-                centerness = dr * dr + dc * dc
-
-                rating = 1 - p if p > 0.5 else p
-                safety = MINE if p > 0.5 else SAFE
-                heappush(heap, (rating, safety, p, centerness, (r, c)))
-
-        logger.debug("all_probs %s", all_probs)
-        logger.debug("heap %s", heap)
-
-        return all_probs, heap
-
-
-    def _heap(self, apply: bool = True):
-        """
-        Build or consume a guess heap.
-        If apply=True, apply a single best guess and return [move].
-        If apply=False, return a list of guess candidates until the first SAFE.
-        """
-        _, heap = self.prob()
-        if heap is None:
-            return []
-
-        safe = False
-
-        all_moves = []
-        effected_cells = [] 
-
-        while heap and ((apply and len(all_moves) == 0) or (not apply and not safe)):
-            rating, safety, p_mine, centerness, (r, c) = heappop(heap)
-            logger.debug(
-                "heappop guess candidate: (%d,%d) p=%.3f rating=%s safety=%s centerness=%.2f",
-                r, c, p_mine, rating, safety, centerness
-            )
-
-            if self.board.revealed[r][c] or self.board.flagged[r][c]:
-                continue
-
-            safety_percent = p_mine * 100.0
-
-            if p_mine < 0.5:
-                guess = Move(r, c, SAFE, [f"GUESS - mine probability: {safety_percent:6.2f}%"])
-            else:
-                guess = Move(r, c, MINE, [f"GUESS - mine probability: {safety_percent:6.2f}%"])
-
-            # TODO: move this apply to the other functions and evict this apply "feature"
-            if apply:
-                ec = self._apply_move(guess)
-                if len(ec) > 0:
-                    effected_cells += ec  
-                    all_moves.append(guess)
-                    break
-            else:
-                all_moves.append(guess)
-            
-            if self.board.game_over: 
-                break 
-
-        return all_moves, effected_cells
-
-
-    # enumeration: uses the LRU cache and signatures per component, if not 
-    #   already done, the enumeration is done   
-    def _get_probabilities(self, comp):
-        """
-        use the lru cache for component signatures and then 
-        enumerate the component, store this with the signature 
-        """
-        
-        # frontier sorts the component before 
-        # it hands it over to the solver
-
-        sig = component_signature(comp)
-
-        cached = self.sig_cache.get(sig)
-        if cached is not None: 
-            logger.debug("cached component gotten: %s", cached) 
-            return cached
-        
-        if comp.k > self.max_k:
-            return None  # too big to enumerate, allegedly 
-
-        # otherwise, run it 
-        result = self._run_probabilities(comp)
-
-        # store in cache
-        self.sig_cache.put(sig, result) 
-        return result 
- 
- 
-    def _run_probabilities(self, comp) -> Dict[str, Any]:
-        """
-        Enumerate all satisfying assignments for a component and
-        compute per-variable mine counts.
-        """
-        unknown_positions = comp.k
-        constraints = comp.constraints  # list of Constraint(mask_local, remaining)
-
-        base_remaining = [c.remaining for c in constraints]
-        base_unknown = [c.mask_local.bit_count() for c in constraints]
-
-        logger.debug("base_remaining: %s", base_remaining)
-        logger.debug("base_unknown: %s", base_unknown)
-
-        assignment = [UNKNOWN] * unknown_positions
-        mine_counts = [0] * unknown_positions
-        total_solutions = 0
-
-        def dfs(pos_index: int,
-                remaining: List[int],
-                unknown: List[int],
-                assignment: List[int]) -> None:
-            nonlocal total_solutions, mine_counts
-
-            logger.debug("pos_index %s, remaining %s, unknown %s", pos_index, remaining, unknown)
-
-            # All positions assigned: check constraints
-            if pos_index == unknown_positions:
-                for r in remaining:
-                    if r != 0:
-                        return
-                logger.debug("valid solution: %s", assignment)
-                total_solutions += 1
-                for i in range(unknown_positions):
-                    if assignment[i] == MINE:
-                        mine_counts[i] += 1
-                return
-
-            pos = pos_index
-
-            for val in (SAFE, MINE):
-                assignment[pos] = val
-
-                rem2 = remaining[:]
-                un2 = unknown[:]
-
-                impossible = False
-
-                for cid, cons in enumerate(constraints):
-                    mask = cons.mask_local
-                    indices = get_indicies_from_bitmask(mask)
-
-                    if pos in indices:
-                        logger.debug("pos %s is in %s", pos, indices)
-
-                        un2[cid] -= 1
-                        if val == MINE:
-                            rem2[cid] -= 1
-
-                        if rem2[cid] < 0:
-                            logger.debug("pruned: rem2[%s] < 0", cid)
-                            impossible = True
-                            break
-                        if rem2[cid] > un2[cid]:
-                            logger.debug("pruned: rem2[%s] > un2[%s]", cid, cid)
-                            impossible = True
-                            break
-                        if un2[cid] == 0 and rem2[cid] != 0:
-                            logger.debug("no unknowns left but non-zero mines remaining")
-                            impossible = True
-                            break
-
-                if not impossible:
-                    dfs(pos_index + 1, rem2, un2, assignment)
-
-                assignment[pos] = UNKNOWN
-
-        dfs(0, base_remaining, base_unknown, assignment)
-
-        return {
-            "solutions": total_solutions,
-            "mine_counts": mine_counts,
-        }
  
 
     def count(self): 
@@ -493,7 +255,7 @@ class Solver:
         comps = self.frontier_components or []
 
         summary: List[Tuple[int, int, int]] = []
-        for i, comp in enumerate(comps):
+        for i, comp in enumeration(comps):
             k = comp.k
             m = len(comp.constraints)
             summary.append((i, k, m))

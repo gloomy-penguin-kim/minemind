@@ -9,7 +9,7 @@ from typing import Set, Tuple
 
 import logging
 
-from analysis.rules.move import CHORD, MINE, OPEN, SAFE, STEP, Move
+from analysis.rules.move import MoveKind, Move
 
 # logger = logging.getLogger(__name__) 
 
@@ -102,71 +102,59 @@ class Board:
             if self.flagged[i][j]
         }
 
-        return ChangeSet(
+        cs = ChangeSet(
             revealed=after_revealed - before_revealed,
             flagged=after_flagged - before_flagged,
             game_over=self.game_over,
             win=self.win,
-        )
-
-    def _apply_move(self, move: Move) -> ChangeSet | None:
-        r, c, kind, _ = move.var()
-
-        if kind in (SAFE, OPEN, STEP):
-            return self.board.apply(Action.OPEN, r, c)
-        elif kind == MINE:
-            return self.board.apply(Action.FLAG, r, c)
-        elif kind == CHORD:
-            return self.board.apply(Action.CHORD, r, c)
-
-        return None
+        )  
+        return cs 
     
 
-    def undo(self) -> bool:
-        if not self._undo_stack:
-            return False
+    def _apply_move(self, move: Move) -> ChangeSet | None: 
+        return self.apply(move.action, move.r, move.c)
 
-        changes = self._undo_stack.pop()
-
-        for r, c in changes.revealed:
-            self.revealed[r][c] = False
-            self._remaining_safe += 1
-
-        for r, c in changes.flagged:
-            self.flagged[r][c] = False
-
-        self.game_over = False
-        self.win = False
-        return True
+ 
+    def undo(self, changes: ChangeSet):
+        for cell, prev in reversed(changes.cells):
+            r, c = cell
+            self.revealed[r][c] = prev.revealed
+            self.flagged[r][c] = prev.flagged
+            self.adj[r][c] = prev.adj 
         
 
     def reveal_cell(self, r: int, c: int) -> ChangeSet:
-        cs = ChangeSet()
-
         if self.game_over or self.revealed[r][c] or self.flagged[r][c]:
-            return cs
+            return ChangeSet()
 
         if not self.mines_placed:
             self.build_board(r, c)
 
+        # Mine click
         if self.is_mine[r][c]:
             self.revealed[r][c] = True
-            cs.revealed.add((r, c))
-            self.game_over = True
-            self.win = False
-            cs.game_over = True
-            return cs
+            self.game_over = True 
+            self.win = False 
+            return ChangeSet(
+                revealed={(r, c)},
+                flagged=set(), 
+                game_over=True,
+                win=False
+            )
 
-        cs.revealed |= self._flood_reveal(r, c)
+        # Safe click
+        revealed = self._flood_reveal(r, c)
 
         win_cs = self._check_win_condition()
-        cs.flagged |= win_cs.flagged
-        cs.game_over = win_cs.game_over
-        cs.win = win_cs.win
 
-        return cs 
+        return ChangeSet(
+            revealed=revealed | win_cs.revealed,
+            flagged=win_cs.flagged,
+            game_over=self.game_over,
+            win=self.win,
+        )
 
- 
+
     def _flood_reveal(self, r: int, c: int) -> set[tuple[int,int]]:
         revealed = set()
         stack = [(r, c)]
@@ -194,54 +182,65 @@ class Board:
 
 
     def _check_win_condition(self) -> ChangeSet:
-        cs = ChangeSet()
-
+        flagged = set() 
         if self._remaining_safe <= 0 and not self.game_over:
             for i in range(self.rows):
                 for j in range(self.cols):
                     if not self.revealed[i][j] and not self.flagged[i][j]:
                         self.flagged[i][j] = True
-                        cs.flagged.add((i, j))
+                        flagged.add((i, j))
 
             self.win = True
             self.game_over = True
-            cs.win = True
-            cs.game_over = True
+            # cs.win = True
+            # cs.game_over = True
 
-        return cs
+        return ChangeSet(
+            revealed=set(),
+            flagged=flagged,
+            game_over=self.game_over,
+            win=self.win,
+        ) 
 
 
-    def toggle_flag(self, r: int, c: int) -> ChangeSet:
-        cs = ChangeSet()
 
-        if self.game_over:
-            return cs
-        if self.revealed[r][c]:
-            return cs
+    def toggle_flag(self, r: int, c: int) -> ChangeSet: 
+
+        if self.game_over or self.revealed[r][c]:
+            return ChangeSet(
+                revealed=set(),
+                flagged=set(),
+                game_over=self.game_over,
+                win=self.win,
+            )  
+        flagged = set()
 
         self.flagged[r][c] = not self.flagged[r][c]
-        cs.flagged.add((r, c))
+        flagged.add((r, c))
 
         # merge in win-condition changes (auto-flagging)
-        win_cs = self._check_win_condition()
-        cs.flagged |= win_cs.flagged
-        cs.game_over = win_cs.game_over
-        cs.win = win_cs.win
+        win_cs = self._check_win_condition() 
 
+        return ChangeSet(
+            revealed=set(),
+            flagged=flagged | win_cs.flagged,
+            game_over=win_cs.game_over,
+            win=win_cs.win,
+        )
         return cs 
     
 
     def chord(self, r: int, c: int) -> ChangeSet:
         cs = ChangeSet()
 
-        if self.game_over:
-            return cs
-        if not self.revealed[r][c]:
-            return cs
-
         num_mines = self.adj[r][c]
-        if num_mines <= 0:
-            return cs
+        if self.game_over or not self.revealed[r][c] or num_mines <= 0:
+            return ChangeSet(
+                revealed=set(),
+                flagged=set(),
+                game_over=self.game_over,
+                win=self.win,
+            )   
 
         flagged = 0
         unknowns: list[tuple[int,int]] = []
@@ -256,18 +255,24 @@ class Board:
         if flagged != num_mines:
             return cs
 
+        game_over, win = False, False 
+        revealed, flagged = set(), set() 
         # reveal all chord-opened neighbors
         for nr, nc in unknowns:
             sub = self.reveal_cell(nr, nc)   # ChangeSet
-            cs.revealed |= sub.revealed
-            cs.flagged  |= sub.flagged
-            cs.game_over = cs.game_over or sub.game_over
-            cs.win = cs.win or sub.win
-            if cs.game_over:  # optional short-circuit
+            revealed |= sub.revealed
+            flagged  |= sub.flagged
+            game_over = game_over or sub.game_over
+            win = win or sub.win
+            if game_over:   
                 break
 
-        return cs
-
+        return ChangeSet(
+            revealed=revealed,
+            flagged=flagged,
+            game_over=game_over,
+            win=win,
+        )
 
 
     def chords(self) -> List[Tuple[int, int]]:
@@ -337,8 +342,14 @@ class Board:
                     total_found += 1
         return messages 
     
-    
-    def undo(self): 
+     
+    def undo(self, cs: ChangeSet):
+        for r, c in cs.revealed:
+            self.revealed[r][c] = False
+        for r, c in cs.flagged:
+            self.flagged[r][c] = False
+        self.game_over = False
+        self.win = False
         self._remaining_safe = (self.rows * self.cols - self.num_mines) - self.count_revealed_cells()
 
 

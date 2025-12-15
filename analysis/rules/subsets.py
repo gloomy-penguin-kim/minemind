@@ -1,10 +1,11 @@
 
 
 from typing import List
-from analysis.rules.move import MINE, SAFE, Move
+from analysis.rules.move import Move, MoveKind, MoveList
+from core.changes import Action
 from core.utility import get_indicies_from_bitmask
 from analysis.frontier.component import Component
-from analysis.rules.move import MoveList
+
 
 
 def _apply_subset(
@@ -63,15 +64,15 @@ def _apply_subset(
 
                 # if all in B\A are SAFE
                 if rem_a == rem_b:
-                    s = [f"Subset: A⊆B, a==b -> B\\A SAFE" ,
+                    s = (f"Subset: A⊆B, a==b -> B\\A SAFE" ,
                          f"{bin(constraints[i].mask_local)} is a subset of",
-                         f"{bin(constraints[j].mask_local)}"]
+                         f"{bin(constraints[j].mask_local)}")
                     _process_moves_for_this_mask(
                         board=board, 
                         moves=moves, 
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
-                        kind=SAFE, 
+                        kind=MoveKind.SAFE, 
                         reason=s
                     )
                     if stop_after_one and len(moves) > 1:
@@ -80,15 +81,15 @@ def _apply_subset(
                 # All in B\A are MINES
                 elif rem_b - rem_a == diff_size: 
                     
-                    s = [f"Subset: A⊆B, b-a==|B\\A| -> B\\A MINES",
+                    s = (f"Subset: A⊆B, b-a==|B\\A| -> B\\A MINES",
                          f"{bin(constraints[i].mask_local)} is a subset of",
-                         f"{bin(constraints[j].mask_local)}"]
+                         f"{bin(constraints[j].mask_local)}")
                     _process_moves_for_this_mask(
                         board=board, 
                         moves=moves, 
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
-                        kind=MINE, 
+                        kind=MoveKind.MINE, 
                         reason=s
                     ) 
                     if stop_after_one and len(moves) > 1:
@@ -105,29 +106,29 @@ def _apply_subset(
                 diff = mask_a & ~mask_b
                 diff_size = diff.bit_count() 
                 if rem_a == rem_b:
-                    s = [f"Subset: B⊆A, a==b -> A\\B SAFE",
+                    s = (f"Subset: B⊆A, a==b -> A\\B SAFE",
                         f"{bin(constraints[j].mask_local)} is a subset of",
-                        f"{bin(constraints[i].mask_local)}"]
+                        f"{bin(constraints[i].mask_local)}")
                     _process_moves_for_this_mask(
                         board=board, 
                         moves=moves, 
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
-                        kind=SAFE, 
+                        kind=MoveKind.SAFE, 
                         reason=s
                     )
                     if stop_after_one and len(moves) > 1:
                         return moves
                 elif rem_a - rem_b == diff_size:
-                    s = [f"Subset: B⊆A, a-b==|A\\B| -> A\\B MINES",
+                    s = (f"Subset: B⊆A, a-b==|A\\B| -> A\\B MINES",
                         f"{bin(constraints[j].mask_local)} is a subset of",
-                        f"{bin(constraints[i].mask_local)}"]
+                        f"{bin(constraints[i].mask_local)}")
                     _process_moves_for_this_mask(
                         board=board, 
                         moves=moves, 
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
-                        kind=MINE, 
+                        kind=MoveKind.MINE, 
                         reason=s
                     )
                     if stop_after_one and len(moves) > 1:
@@ -157,7 +158,13 @@ def _process_moves_for_this_mask(
         if board.revealed[r][c] or board.flagged[r][c]:
             continue  
         
-        move = Move(r, c, kind, reason, score=None)
+        a = Action.OPEN if kind == MoveKind.OPEN else Action.FLAG 
+        
+        move = Move(r, c, 
+                    action=a, 
+                    kind=kind, 
+                    reason=reason, 
+                    score=None)
         moves.add_move(move)  
 
     return moves   

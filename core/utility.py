@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 
 def get_indicies_from_bitmask(mask) -> List[int]: 
     """Return zero-based indices of bits set in a bitmask."""
@@ -20,3 +20,5 @@ def put_indicies_into_a_bitmask(arr):
 def rc_to_gid(r, c, cols):
     return r * cols + c 
  
+
+Coord = Tuple[int, int]

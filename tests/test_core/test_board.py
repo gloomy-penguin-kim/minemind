@@ -1,4 +1,3 @@
-import pytest 
 from core.generator import * 
 from core.board import Board 
 
@@ -40,16 +39,19 @@ def test_mine_click_sets_game_over():
     b.mines_placed = True
     b.is_mine = [[True, False],
                 [False, False]]
-    b.adj = [[0, 1],
+    b.adj = [[-1, 1],
             [1, 1]]
 
     cs = b.reveal_cell(0, 0)
 
-    assert b.game_over is True
-    assert b.win is False
+    b.render_board() 
+
     assert (0, 0) in cs.revealed
     assert cs.game_over is True
     assert cs.win is False
+    assert b.win is False
+    
+    assert b.game_over is True
 
 
 def test_flood_reveal_zero_region():

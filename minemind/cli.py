@@ -2,9 +2,11 @@
 
 import shlex
 import argparse
+from typing import List
  
 from core.snapshot import save_snapshot, load_snapshot
-from core.config import config  
+from core.config import config
+from analysis.rules.move import Move, Action, MoveKind
 from minemind.game import Game
 
 
@@ -164,31 +166,35 @@ def _parse_rc(args, usage: str):
         return None
     return r, c
 
+def _print_moves(moves, verbose=False):
+    if not moves:
+        return
 
-def _print_moves(moves, verbose=False): 
-    if len(moves) == 1: 
-        move = moves[0] 
+    def first_reason(m):
+        return m.reasons[0] if getattr(m, "reasons", None) else ""
+
+    if isinstance(moves, Move):
+        m = moves
         if verbose:
-            print(move)
-            if move.reason: 
-                for line in move.reason: 
-                    print(f"   {line}")
-        else: 
-            r = move.reason[0] if len(move.reason) > 0 else "" 
-            print(move, r)
+            print(m)
+            for line in (m.reasons or ()):
+                print(f"   {line}")
             print()
-        return 
-
-    for i, move in enumerate(moves): 
-        if verbose:
-            print(f"{i+1:2} -", move)
-            if move.reason: 
-                for line in move.reason: 
+        else:
+            r = first_reason(m)
+            print(m, r)
+            print()
+        return
+    if isinstance(moves, List):
+        for i, m in enumerate(moves, start=1):
+            if verbose:
+                print(f"{i:2} -", m)
+                for line in (m.reasons or ()):
                     print(f"       {line}")
-        else: 
-            r = move.reason[0] if len(move.reason) > 0 else "" 
-            print(f"{i+1:2} -", move, r)
-    print()
+            else:
+                r = first_reason(m)
+                print(f"{i:2} -", m, r)
+        print()
 
 
 def cmd_open(g: Game, args):
@@ -206,27 +212,35 @@ def cmd_open(g: Game, args):
         g.start_timer()
     
     try:
-        opened = g.solver.open(r, c)
+        opened = g.open(r,c)
 
-        if not opened:
+        if not opened: 
             print("open did not succeed... please restart program\n")
             return
+        
+        changed = len(opened.revealed) + len(opened.flagged)
+        if changed == 0:
+            print("nothing changed (already revealed/flagged or game over)\n")
+            return 
 
         r = len(opened.revealed)
-        
-        if r == 0: 
-            print(f"revealed: {r} cells") 
-        elif r == 1: 
+
+        if r == 1: 
             print(f"revealed: {r} cell") 
         else:
             print(f"revealed: {r} cells") 
-
         print()
         g.render_board()
-        g.is_winner()
+        g.is_winner(opened.game_over, opened.win)
     except AssertionError as e:
         g.render_board() 
         print(e)  
+
+    # revealed: Set[Coord] = field(default_factory=set)
+    # flagged: Set[Coord] = field(default_factory=set)
+    # game_over: bool = False
+    # win: bool = False
+    # note: str = ""
 
 
 def cmd_flag(g: Game, args):
@@ -240,17 +254,17 @@ def cmd_flag(g: Game, args):
     if not g.verify_coords(r, c):
         return
 
-    try:
-        flagged = g.solver.flag(r, c) 
+    try: 
+        flagged = g.flag(r, c)
         
         if not flagged:
             print("flag has failed you... try again\n")
             return
         
-        print(flagged)
+        _print_moves(flagged)
         print()
         g.render_board()
-        g.is_winner()
+        g.is_winner(flagged.game_over, flagged.win)
     except AssertionError as e:
         g.render_board() 
         print(e)  
@@ -267,8 +281,6 @@ def cmd_chord(g: Game, args):
     try:
         chord = g.solver.chord(r, c)  
         
-        print(chord) 
-        
         if len(chord.revealed) == 0:
             print("chord found no cells to reveal for you\n")
             return
@@ -278,47 +290,55 @@ def cmd_chord(g: Game, args):
 
         print()
         g.render_board()
-        g.is_winner()
+        g.is_winner(chord.game_over, chord.win)
     except AssertionError as e:
         g.render_board() 
         print(e)  
 
 
-def cmd_chords(g: Game, args=None):
-    if not g.validate_board():
-        return
-
+def cmd_chords(g: Game, args=None):  
     try: 
-        chords = g.solver.chords() 
+        chords = g.chords() 
         if not chords:
             print("no chords were found.\n")
             return
 
         for r, c in chords:
             print(f"chords: r={r},c={c}")
-        print()
+
+        print() 
     except AssertionError as e:
         g.render_board() 
         print(e)  
 
 
-def cmd_undo(g: Game, args=None): 
-    if g.board and g.solver: 
-        game_over = g.board.game_over
-        try:
-            undone = g.solver.undo() 
-            if not undone: 
-                print("undo had some issues...\n")
-                return
-            if game_over: 
-                g.resume_timer() 
-            g.solver.refresh_frontier()
-            g.render_board()
-        except AssertionError as e:
-            g.render_board() 
-            print(e)   
-    else:
-        print("use 'new ...' or 'load ...' to start a new game.\n")
+def cmd_undo(g: Game, args=None):  
+    if args:
+        print("usage: undo\n")
+        return
+
+    result = g.undo()
+    if result is not True:
+        print(result)
+        return 
+        
+    g.render_board()
+
+    # if g.board and g.solver: 
+    #     game_over = g.board.game_over
+    #     try:
+    #         undone = g.solver.undo() 
+    #         if not undone: 
+    #             print("undo had some issues...\n")
+    #             return
+    #         if game_over: 
+    #             g.resume_timer()  
+    #         g.render_board()
+    #     except AssertionError as e:
+    #         g.render_board() 
+    #         print(e)   
+    # else:
+    #     print("use 'new ...' or 'load ...' to start a new game.\n")
 
 
 def cmd_verify(g: Game, args=None):

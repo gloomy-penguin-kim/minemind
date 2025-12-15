@@ -13,9 +13,7 @@ def component_signature(comp: Component) -> Signature:
     """
     k = comp.k
 
-    # Extract (mask, remaining) for each constraint
-    pairs = [(c.mask_global, c.remaining) for c in comp.constraints]
- 
+    pairs = [(c.mask_local, c.remaining) for c in comp.constraints]
     pairs.sort(key=lambda p: (p[0], p[1]))
 
     scopes = tuple(p[0] for p in pairs)

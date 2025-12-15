@@ -8,15 +8,23 @@ Coord = Tuple[int, int]
 class Action(Enum):
     OPEN = auto()
     FLAG = auto()
-    CHORD = auto()
+    CHORD = auto() 
 
-@dataclass
+@dataclass(frozen=True)
 class ChangeSet:
     revealed: Set[Coord] = field(default_factory=set)
     flagged: Set[Coord] = field(default_factory=set)
     game_over: bool = False
     win: bool = False
-    note: str = ""
+
+    @property
+    def empty(self) -> bool:
+        return not self.revealed and not self.flagged and not self.game_over
+        
+    def __bool__(self) -> bool:
+        # Always consider it a "valid result"
+        return True
+
 
 @dataclass
 class Delta:
