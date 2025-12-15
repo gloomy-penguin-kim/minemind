@@ -73,7 +73,7 @@ def _apply_subset(
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
                         kind=MoveKind.SAFE, 
-                        reason=s
+                        reasons=s
                     )
                     if stop_after_one and len(moves) > 1:
                         return moves 
@@ -90,7 +90,7 @@ def _apply_subset(
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
                         kind=MoveKind.MINE, 
-                        reason=s
+                        reasons=s
                     ) 
                     if stop_after_one and len(moves) > 1:
                         return moves
@@ -115,7 +115,7 @@ def _apply_subset(
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
                         kind=MoveKind.SAFE, 
-                        reason=s
+                        reasons=s
                     )
                     if stop_after_one and len(moves) > 1:
                         return moves
@@ -129,7 +129,7 @@ def _apply_subset(
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
                         kind=MoveKind.MINE, 
-                        reason=s
+                        reasons=s
                     )
                     if stop_after_one and len(moves) > 1:
                         return moves

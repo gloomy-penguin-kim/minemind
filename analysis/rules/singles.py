@@ -38,7 +38,7 @@ def _apply_singles(
                             c=c, 
                             action=Action.OPEN, 
                             kind=MoveKind.SAFE, 
-                            reason=("Singles: remaining == 0 are SAFE"), 
+                            reasons=("Singles: remaining == 0 are SAFE"), 
                             score=None)
                 moves.add_move(move)
                 if stop_after_one: return 
@@ -58,7 +58,7 @@ def _apply_singles(
                             c=c, 
                             action=Action.FLAG,
                             kind=MoveKind.MINE, 
-                            reason=s, 
+                            reasons=s, 
                             score=None) 
                 moves.add_move(move)
                 if stop_after_one: return 

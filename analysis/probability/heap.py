@@ -1,49 +1,50 @@
+from __future__ import annotations
+from dataclasses import dataclass
+from heapq import heappush, heappop
+from typing import Callable, Dict, Iterable, List, Tuple, Optional
 
 
+@dataclass(frozen=True, order=True)
+class GuessItem:
+    rating: float
+    p_mine: float
+    centerness: float
+    r: int
+    c: int
 
-def heap(self, limit=5):
+def build_guess_heap(all_probs: Dict[Tuple[int, int], float], rows: int, cols: int) -> List[GuessItem]:
+    heap: List[GuessItem] = []
+    for (r, c), p in all_probs.items():
+        dr = r - (rows - 1) / 2.0
+        dc = c - (cols - 1) / 2.0
+        centerness = dr * dr + dc * dc
+        rating = 1 - p if p > 0.5 else p
+        heappush(heap, GuessItem(rating=rating, p_mine=p, centerness=centerness, r=r, c=c))
+    return heap
+
+
+def pop_candidates(
+    heap: List[GuessItem],
+    *,
+    skip: Callable[[int, int], bool],
+    stop_after_safe: bool,
+    limit: Optional[int] = None,
+) -> List[GuessItem]:
     """
-    Build or consume a guess heap.
-    If apply=True, apply a single best guess and return [move].
-    If apply=False, return a list of guess candidates until the first SAFE.
+    Pop guess candidates from heap.
+    - skip(r,c) lets caller filter revealed/flagged/out-of-bounds/etc
+    - if stop_after_safe=True: stop once we popped the first p_mine < 0.5 candidate
+    - limit: max returned items
     """
-    _, heap = self.prob()
-    if heap is None:
-        return []
+    out: List[GuessItem] = []
+    
+    limit = max(5,len(heap)//4) if limit is None else limit 
 
-    safe = False
-
-    all_moves = []
-    effected_cells = [] 
-
-    while heap and ((apply and len(all_moves) == 0) or (not apply and not safe)):
-        rating, safety, p_mine, centerness, (r, c) = heappop(heap)
-        logger.debug(
-            "heappop guess candidate: (%d,%d) p=%.3f rating=%s safety=%s centerness=%.2f",
-            r, c, p_mine, rating, safety, centerness
-        )
-
-        if self.board.revealed[r][c] or self.board.flagged[r][c]:
+    while heap and (limit is None or len(out) < limit):
+        item = heappop(heap)
+        if skip(item.r, item.c):
             continue
-
-        safety_percent = p_mine * 100.0
-
-        if p_mine < 0.5:
-            guess = Move(r, c, MoveKind.SAFE, [f"GUESS - mine probability: {safety_percent:6.2f}%"])
-        else:
-            guess = Move(r, c, MoveKind.MINE, [f"GUESS - mine probability: {safety_percent:6.2f}%"])
-
-        # TODO: move this apply to the other functions and evict this apply "feature"
-        if apply:
-            ec = self._apply_move(guess)
-            if len(ec) > 0:
-                effected_cells += ec  
-                all_moves.append(guess)
-                break
-        else:
-            all_moves.append(guess)
-        
-        if self.board.game_over: 
-            break 
-
-    return all_moves, effected_cells
+        out.append(item)
+        if stop_after_safe and item.p_mine < 0.5:
+            break
+    return out

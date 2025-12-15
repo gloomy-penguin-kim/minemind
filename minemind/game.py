@@ -45,7 +45,19 @@ class Game:
     
     def verify(self): 
         if not self.validate_board(): return False 
-        return self.solver.verify() 
+        return self.solver.verify()  
+    
+    def hint(self): 
+        if not self.validate_board(): return False 
+        return self.solver.hint() 
+    
+    def step(self, guess=False): 
+        if not self.validate_board(): return False 
+        return self.solver.step(guess=guess) 
+    
+    def auto(self, guess=False, limit=None): 
+        if not self.validate_board(): return False 
+        return self.solver.auto(guess=guess, limit=limit) 
 
     def apply_action(self, action: Action, r: int, c: int, note: str = ""):
         move = Move(r=r, c=c, action=action, kind=None, reasons=())  # kind optional

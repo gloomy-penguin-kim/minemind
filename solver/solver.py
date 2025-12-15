@@ -55,10 +55,7 @@ class Solver:
 
         self.moves = 0 
  
-        self.refresh_frontier()  
-
-        if self.board.mines_placed: 
-            self.verify_and_history((), "loaded saved game") 
+        self.refresh_frontier()   
 
 
     # these handle when the board is modified and becomes dirty  
@@ -71,16 +68,7 @@ class Solver:
         """
         cli command for open 
         """
-        return self.board.apply(Action.OPEN, r, c)
-        # first = not self.board.mines_placed
-        # move = Move(x, y, kind=OPEN)
-        # effected = self._apply_move(move)  
-        # if len(effected) == 0: 
-        #     return None 
-        # elif first:
-        #     self.verify_and_history(moves=effected, note=f"OPEN {x},{y}")
-        #     return move
-        # self.verify_and_history(moves=effected, note=f"OPEN {x},{y}")  
+        return self.board.apply(Action.OPEN, r, c)  
 
 
     def flag(self, r, c):
@@ -152,7 +140,7 @@ class Solver:
         - run deterministic steps + exact enumeration
         - if guess=True and no certain moves: pick lowest-risk guess
         - stop after limit moves if provided
-        """
+        """ 
 
         if not self.verify_board(): 
             return None 
@@ -166,11 +154,10 @@ class Solver:
             if limit is not None and len(all_moves) >= limit:
                 break
  
-            if self.board.game_over: 
-                break
+            if not self.verify_board(): 
+                break 
 
             # Rebuild frontier for current board
-
             self.refresh_frontier()              
             moved = False
 
@@ -181,7 +168,9 @@ class Solver:
                     break
 
                 # apply_rules returns list[(r, c, kind, reason)]
-                moves, conflicts = apply_rules(comp, self.board)
+                moves = apply_rules(self.frontier_components, 
+                                    self.board, 
+                                    stop_after_one=False)
 
                 if not moves:
                     continue
@@ -192,13 +181,10 @@ class Solver:
                     if len(moves) > remaining_steps:
                         moves = moves[:remaining_steps] 
 
-                if moves:  
-                    mv,ec = self._apply_moves(moves)    
-                    if len(ec) > 0: 
-                        moved = True    
-                        effected_cells.extend(ec) 
-                        all_moves.extend(mv) 
-                        self.refresh_frontier()              
+                if moves:   
+                    for move in moves:
+                        return self.board.apply(move.action, move.r, move.c) 
+                    self.refresh_frontier()        
 
             # If we made at least one deterministic move, loop around again
             if moved:
@@ -216,8 +202,8 @@ class Solver:
 
             all_moves.extend(guesses)   
             effected_cells.extend(guess_effected_cells) 
-
-            if self.board.game_over:  
+ 
+            if not self.verify_board(): 
                 break 
 
         if len(effected_cells) > 0:      
@@ -230,16 +216,12 @@ class Solver:
 
     def prob(self) -> Tuple[Dict[Tuple[int, int], float], List[Tuple[float, int, float, float, Tuple[int, int]]]]:
         self.refresh_frontier() 
-        return enumeration(self.board, self.frontier_components)
+        return self.prob_engine.compute_probabilities(self.board, self.frontier_components)
 
  
-
     def count(self): 
         """
-        cli command to count number of flags on the board and I chose
-        to do isolation of responsibility instead of putting these in one 
-        huge function but now I have O(3N) instead of O(N) and 3 billion
-        sure seems larger than just a billion but... it's easier to test? 
+        cli command to count number of flags, revealed, unknown
         """
         if not self.verify_board(): 
             return 
@@ -255,7 +237,7 @@ class Solver:
         comps = self.frontier_components or []
 
         summary: List[Tuple[int, int, int]] = []
-        for i, comp in enumeration(comps):
+        for i, comp in enumerate(comps):
             k = comp.k
             m = len(comp.constraints)
             summary.append((i, k, m))
@@ -268,16 +250,16 @@ class Solver:
         Prefer deterministic rules; fall back to probability-based guess.
         """
         if not self.verify_board():
-            return None
+            return None 
+        
+        self.refresh_frontier() 
 
-        conflicts_arr: List[Any] = []
-
-        for comp in self.frontier_components or []:
-            _, conflicts = apply_rules(comp, self.board, stop_after_one=False)
-            if conflicts:
-                conflicts_arr.extend(conflicts) 
+        conflicts = apply_rules(self.frontier_components, 
+                                self.board, 
+                                stop_after_one=False, 
+                                conflicts_only=True) 
   
-        return conflicts_arr
+        return conflicts
 
 
     def _apply_moves(self, moves: List[Move]): 
@@ -294,71 +276,6 @@ class Solver:
 
     def _apply_move(self, move: Move): 
         return self.board.apply(move.action, move.r, move.c)
-
-    def verify_and_history(self, moves, note, count=1):   
-        logger.debug("moves: %s", moves)  
-        board = self.board 
-
-        if config.invariants: 
-            if len(self.history) > 0:
-                logger.debug("Comparing.... %s and %s", self.history[-1]["note"], note)
-                board.test_previous_state(self.history[-1], moves)
-
-            board.test_flagged_mines_and_unknowns() 
-            board.test_adj_numbers() 
-            board.test_mines_not_revealed()
-            board.test_cells_cannot_be_flagged_and_revealed()
-        
-        self.push_history(count, note)   
-        self.moves += count  
-        
-        self.refresh_frontier() 
-
-
-    def push_history(self, count, note):          
-        curr = { "flagged":  copy.deepcopy(self.board.flagged),
-                 "revealed": copy.deepcopy(self.board.revealed),
-                 "adj":      copy.deepcopy(self.board.adj),
-                 "is_mine":  copy.deepcopy(self.board.is_mine),
-                 "moves":    count,
-                 "time":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                 "note":     note 
-                }
-        self.history.append(curr)  
-
-
-    def undo(self):
-        if not self.board or not self.board.mines_placed:
-            return "please make first move first with command `open X Y`\n"
-        if len(self.history) < 2:
-            return "cannot undo first move\n"
-
-        # remove the latest snapshot (the action we are undoing)
-        last = self.history.pop()
-        delta = last["moves"]
-
-        # restore to the previous snapshot (now the top)
-        prev = self.history[-1]
-
-        self.board.flagged = copy.deepcopy(prev["flagged"])
-        self.board.revealed = copy.deepcopy(prev["revealed"])
-        self.board.adj = copy.deepcopy(prev["adj"])
-        self.board.is_mine = copy.deepcopy(prev["is_mine"])
-
-        self.board.win = False
-        self.board.game_over = False
-        self.game_over_snapshot = False
-
-        # fix move counter by subtracting the delta we just undid
-        self.moves = max(0, self.moves - delta) 
-
-        # if Board has its own undo bookkeeping, keep it, but make sure it
-        # does NOT also try to manage solver history/move counts.
-        self.board.undo()
-
-        self.refresh_frontier()
-        return True
-
     
   
     def verify_board(self): 

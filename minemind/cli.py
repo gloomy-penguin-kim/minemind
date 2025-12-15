@@ -372,11 +372,11 @@ def cmd_hint(g: Game, args=None):
         return
     
     try:
-        moves, _ = g.solver.hint()
-        if not moves:
+        move = g.hint()
+        if not move:
             print("no deterministic move found. try command `prob`.\n")
             return  
-        _print_moves(moves, ns.verbose)
+        _print_moves(move, ns.verbose)
     except AssertionError as e:
         g.render_board() 
         print(e)  
@@ -385,10 +385,7 @@ def cmd_hint(g: Game, args=None):
 def cmd_step(g: Game, args):
     """
     step [--guess]
-    """
-    if not g.validate_board():
-        return
-
+    """  
     parser = argparse.ArgumentParser(prog="step", add_help=False)
     parser.add_argument("--guess", action="store_true")
     parser.add_argument("--verbose", action="store_true")
@@ -398,7 +395,7 @@ def cmd_step(g: Game, args):
         return
 
     try: 
-        move, _ = g.solver.step(ns.guess)
+        move = g.step(ns.guess)
 
         if not move:
             msg = "no move found."
@@ -407,10 +404,10 @@ def cmd_step(g: Game, args):
             print(msg + "\n")
             return
         
-        _print_moves([move], ns.verbose)
+        _print_moves(move, ns.verbose)
     
         g.render_board()
-        g.is_winner()
+        g.is_winner(move.game_over, move.win)
     except AssertionError as e:
         g.render_board() 
         print(e)  
@@ -420,9 +417,6 @@ def cmd_auto(g: Game, args):
     """
     auto [--guess] [--limit N]
     """
-    if not g.validate_board():
-        return
-
     parser = argparse.ArgumentParser(prog="auto", add_help=False)
     parser.add_argument("--guess", action="store_true") 
     parser.add_argument("--limit", type=int)
@@ -437,7 +431,7 @@ def cmd_auto(g: Game, args):
         return
 
     try:
-        moves = g.solver.auto(ns.guess, ns.limit)
+        moves = g.auto(ns.guess, ns.limit)
     
         if not moves:
             msg = "no moves found."
@@ -449,7 +443,7 @@ def cmd_auto(g: Game, args):
         _print_moves(moves, ns.verbose)
 
         g.render_board()
-        g.is_winner()
+        g.is_winner(moves.game_over, moves.win)
     except AssertionError as e:
         g.render_board() 
         print(e)  
