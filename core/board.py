@@ -363,9 +363,7 @@ class Board:
             for j in range(self.cols):
                 if self.flagged[i][j]:
                     if not self.is_mine[i][j]:
-                        messages.append((i, j, False))
-                    else:
-                        messages.append((i, j, True))
+                        messages.append((i, j, False)) 
                         total_flagged += 1
                 if self.is_mine[i][j]:
                     total_found += 1

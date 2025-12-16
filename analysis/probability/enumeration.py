@@ -4,14 +4,12 @@ from dataclasses import dataclass
 from heapq import heappush
 from typing import Dict, List, Tuple, Callable
 
+from analysis.probability.auto import guess_moves_for_auto
 from core.lru import LRUCache
 from core.signatures import component_signature
 
-# Keep enumeration independent of Solver/CLI enums
-UNKNOWN = -1
-SAFE = 0
-MINE = 1
 
+from core.constants import CellType
 
 @dataclass(frozen=True)
 class ProbResult:
@@ -28,7 +26,7 @@ def enumerate_component(comp) -> ProbResult:
 
     mine_counts = [0] * k
     total = 0
-    assignment = [UNKNOWN] * k
+    assignment = [CellType.UNKNOWN] * k
 
     def dfs(pos: int, remaining: List[int], unknown: List[int]) -> None:
         nonlocal total, mine_counts
@@ -37,11 +35,11 @@ def enumerate_component(comp) -> ProbResult:
             if all(r == 0 for r in remaining):
                 total += 1
                 for i, v in enumerate(assignment):
-                    if v == MINE:
+                    if v == CellType.MINE:
                         mine_counts[i] += 1
             return
 
-        for val in (SAFE, MINE):
+        for val in (CellType.SAFE, CellType.MINE):
             assignment[pos] = val
 
             rem2 = remaining[:]
@@ -51,7 +49,7 @@ def enumerate_component(comp) -> ProbResult:
             for cid, cons in enumerate(constraints):
                 if (cons.mask_local >> pos) & 1:
                     un2[cid] -= 1
-                    if val == MINE:
+                    if val == CellType.MINE:
                         rem2[cid] -= 1
 
                     if rem2[cid] < 0 or rem2[cid] > un2[cid]:
@@ -64,7 +62,7 @@ def enumerate_component(comp) -> ProbResult:
             if not impossible:
                 dfs(pos + 1, rem2, un2)
 
-            assignment[pos] = UNKNOWN
+            assignment[pos] = CellType.UNKNOWN
 
     dfs(0, base_remaining, base_unknown)
     return ProbResult(total, tuple(mine_counts))
@@ -127,5 +125,4 @@ class ProbabilityEngine:
                 continue
             all_probs.update(probs_for_component(comp, res, board.cols, skip))
 
-        heap = build_guess_heap(all_probs, board.rows, board.cols)
-        return all_probs, heap
+        return all_probs 

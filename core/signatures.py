@@ -19,4 +19,4 @@ def component_signature(comp: Component) -> Signature:
     scopes = tuple(p[0] for p in pairs)
     rems   = tuple(p[1] for p in pairs)
 
-    return (k, scopes, rems)
+    return (k, scopes, rems) 

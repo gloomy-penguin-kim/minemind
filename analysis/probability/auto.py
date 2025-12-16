@@ -1,16 +1,23 @@
 
 
-from analysis.probability.guess import GuessItem
+from dataclasses import dataclass 
 from analysis.rules.move import Move
 from core.constants import Action  
 
 import logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
+logger.setLevel(logging.ERROR)
 
 SAFE_T = 0.05
 MINE_T = 0.95
+
+@dataclass(frozen=True, order=True)
+class GuessItem:
+    rating: float
+    p_mine: float
+    centrality: float
+    r: int
+    c: int 
 
 def guess_moves_for_auto(all_probs: dict[tuple[int,int], float], rows: int, cols: int) -> tuple[list[Move], bool]:
     """
@@ -34,7 +41,11 @@ def guess_moves_for_auto(all_probs: dict[tuple[int,int], float], rows: int, cols
     items.sort(key=lambda g: (g.p_mine, g.rating, g.centrality))
 
     sure_safe = [g for g in items if g.p_mine <= SAFE_T]
-    sure_mine = [g for g in items if g.p_mine >= MINE_T]  # optional 
+    sure_mine = [g for g in items if g.p_mine >= MINE_T]  # optional
+
+    logger.debug("sure_safe: %s", sure_safe)
+    logger.debug("sure_mine: %s", sure_mine)
+
     moves: list[Move] = []
 
     # 1) Apply all sure-safe opens
@@ -43,7 +54,7 @@ def guess_moves_for_auto(all_probs: dict[tuple[int,int], float], rows: int, cols
             r=g.r, c=g.c,
             action=Action.OPEN,
             kind=Action.GUESS,
-            reasons=(f"mine probability: {g.p_mine*100.0:6.2f}% (near-certain safe)",),
+            reasons=(f"GUESS - mine probability: {g.p_mine*100.0:6.2f}% (near-certain safe)",),
             score=g.p_mine
         ))
 
@@ -55,7 +66,7 @@ def guess_moves_for_auto(all_probs: dict[tuple[int,int], float], rows: int, cols
             action=Action.FLAG,
             val=True, 
             kind=Action.GUESS,
-            reasons=(f"mine probability: {g.p_mine*100.0:6.2f}% (near-certain mine)",),
+            reasons=(f"GUESS - mine probability: {g.p_mine*100.0:6.2f}% (near-certain mine)",),
             score=g.p_mine
         ))
 
@@ -70,7 +81,7 @@ def guess_moves_for_auto(all_probs: dict[tuple[int,int], float], rows: int, cols
         r=g0.r, c=g0.c,
         action=action,
         kind=Action.GUESS,
-        reasons=(f"mine probability: {g0.p_mine*100.0:6.2f}% (best available)",),
+        reasons=(f"GUESS - mine probability: {g0.p_mine*100.0:6.2f}% (best available)",),
         score=g0.p_mine,
-        val=val 
+        val=val
     )], False

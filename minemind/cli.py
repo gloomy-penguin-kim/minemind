@@ -1,5 +1,6 @@
 # minemind/cli.py
 
+import readline
 import shlex
 import argparse
 from typing import List
@@ -172,6 +173,16 @@ def _parse_rc(args, usage: str):
         return None
     return r, c
 
+
+def _print_conflicts(conflicts): 
+    if len(conflicts) > 0: 
+        print("please check conflicts\n")
+        # print("conflicts found, cannot continue")
+        # for (r,c) in conflicts: 
+        #     print(f"conflicts: r={r},c={c}") 
+        # print()     
+
+
 def _print_moves(moves, verbose=False):
     if not moves:
         return
@@ -226,9 +237,8 @@ def cmd_open(g: Game, args):
         if not opened: 
             print("open did not succeed... please restart program\n")
             return
-        
-        changed = len(opened.revealed) + len(opened.flagged)
-        if changed == 0:
+         
+        if opened.empty: 
             print("nothing changed (already revealed/flagged or game over)\n")
             return 
 
@@ -309,7 +319,7 @@ def cmd_chords(g: Game, args=None):
     try: 
         chords = g.chords() 
         if not chords:
-            print("no chords were found.\n")
+            print("no chords were found\n")
             return
 
         for r, c in chords:
@@ -354,7 +364,7 @@ def cmd_verify(g: Game, args=None):
     try:
         messages = g.solver.verify()
         if not messages:
-            print("all flags found are correct.\n")
+            print("all flags found are correct\n")
             return
 
         for r, c, correct in messages:
@@ -376,14 +386,16 @@ def cmd_hint(g: Game, args=None):
         return
 
     try:
-        moves = g.hint(guess=ns.guess)   # <- make hint return list[Move]
+        moves,conflicts = g.hint(guess=ns.guess)   # <- make hint return list[Move]
         
         if not moves:
-            msg = "no deterministic move found."
+            msg = "no move found"
             if not ns.guess:
-                msg += " try `hint --guess` (or `prob`)."
+                msg += ". try `hint --guess` (or `prob --verbose`)"
             print(msg + "\n")
             return
+        
+        _print_conflicts(conflicts) 
 
         _print_moves(moves, ns.verbose)
 
@@ -406,19 +418,22 @@ def cmd_step(g: Game, args):
         return
 
     try: 
-        move, cs = g.step(ns.guess)
-
-        if not move:
-            msg = "no move found."
+        move, cs, conflicts = g.step(ns.guess)
+        print(move) 
+        if move: 
+            _print_moves(move, ns.verbose)
+            _print_conflicts(conflicts)
+            g.render_board()
+            g.is_winner(cs.game_over, cs.win)
+            
+        else: 
+            msg = "no move found"
             if not ns.guess:
-                msg += " try using `step --guess`."
+                msg += ". try using `step --guess`"
             print(msg + "\n")
-            return
-        
-        _print_moves(move, ns.verbose)
-    
-        g.render_board()
-        g.is_winner(cs.game_over, cs.win)
+            _print_conflicts(conflicts)
+            return 
+
     except AssertionError as e:
         g.render_board() 
         print(e)  
@@ -443,33 +458,31 @@ def cmd_auto(g: Game, args):
         return
     
     if ns.force and not ns.guess: 
-        print("** forcing is not necessary without guessing **\n")
+        print("forcing is not used without guessing\n")
 
     try:
         moves, cs, conflicts = g.auto(ns.guess, ns.limit, ns.force)
         
         if len(moves) > 0: 
             _print_moves(moves, ns.verbose)
+            _print_conflicts(conflicts) 
+            g.render_board()
+            g.is_winner(cs.game_over, cs.win)
+
         else:
-            msg = "no moves found. "
+            msg = "no moves found"
             if not ns.guess:
-                msg += "try `auto --guess`"
-            else: 
-                msg += "try `auto --guess --force`"
-            print(msg + "\n")
-            return 
-
-        if len(conflicts) > 0: 
-            print("** conflicts found, cannot continue auto ** ")
-            for (r,c) in conflicts: 
-                print(f"conflicts: r={r},c={c}") 
-            print()      
-
-        g.render_board()
-        g.is_winner(cs.game_over, cs.win)
+                msg += ". try `auto --guess`"
+            elif not ns.force: 
+                msg += ". try `auto --guess --force`"
+            print(msg + "\n") 
+            _print_conflicts(conflicts) 
+            
+ 
     except AssertionError as e:
         g.render_board() 
         print(e)  
+
 
 
 def cmd_prob(g: Game, args):
@@ -547,8 +560,10 @@ def cmd_conflcits(g: Game, args=None):
         return
     try:
         conflicts = g.solver.conflicts()
-        for (r,c) in conflicts: 
-            print(f"conflicts: r={r},c={c}") 
+        for rc,reasons in conflicts: 
+            print(f"conflicts: r={rc[0]},c={rc[1]}")
+            for reason in reasons: 
+                print(f"   {reason}") 
         if len(conflicts) == 0: 
             print("no conflicts found")
         print("")

@@ -4,6 +4,7 @@
 from __future__ import annotations 
 from typing import List, Tuple  
 from analysis.frontier.component import Component 
+from analysis.rules.equivalence import _apply_equivalence
 from analysis.rules.move import Move, MoveList
 from analysis.rules.singles import _apply_singles
 from analysis.rules.subsets import _apply_subset
@@ -28,10 +29,15 @@ def apply_rules(
 
     for comp in comps: 
         _apply_singles(comp, board, moves, stop_after_one)
+
         if len(moves) > 1 and not stop_after_one:
             _apply_subset(comp, board, moves, stop_after_one)  
-        r, c = moves.get_arrays() 
-        rules += r 
+
+            if len(moves) > 1 and not stop_after_one: 
+                _apply_equivalence(comp, board, moves, stop_after_one)
+                
+        m, c = moves.get_arrays() 
+        rules += m
         conflicts += c  
 
     for rule in rules: 

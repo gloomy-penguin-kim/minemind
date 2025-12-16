@@ -8,6 +8,9 @@ from solver.solver import Solver
 from minemind.timer import Timer
 from minemind.render import render_board, render_prob_heatmap, render_frontier 
 
+import logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 class Game:
 
@@ -46,22 +49,19 @@ class Game:
 
     def step(self, guess=False): 
         if not self.validate_board(): return False 
-        move, cs = self.solver.step(guess) 
+        move, cs, conflicts = self.solver.step(guess) 
         if move: self.update_to_history([move], cs, 1, note=f"STEP {move.r},{move.c}")
-        return move, cs 
+        return move, cs, conflicts
     
     def auto(self, guess=False, limit=None, force=False): 
         if not self.validate_board(): return [], ChangeSet()  
         moves, cs, conflicts = self.solver.auto(guess=guess, limit=limit, force=force)   
-        self.update_to_history(moves, cs, move_count=len(moves)) 
+        self.update_to_history(moves, cs, move_count=len(moves))  
         return moves, cs, conflicts
 
     def apply_action(self, action: Action, r: int, c: int, note: str = ""):
-        move = Move(r=r, c=c, action=action, kind=None, reasons=())  # kind optional
-        print("apply before ")
-        cs = self.board.apply(action, r, c)
-        print("apply after ", cs)
-
+        move = Move(r=r, c=c, action=action, kind=None, reasons=())  # kind optional 
+        cs = self.solver._apply(action, r, c)  
         self.history.append(HistoryEntry(moves=[move], 
                                          changes=cs, 
                                          move_count_before=self.moves, 

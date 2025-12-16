@@ -5,39 +5,18 @@
 
 # build frontier, local indexing., component extraction 
  
-# core/frontier.py 
-from dataclasses import dataclass
-from typing import List, Tuple 
+# core/frontier.py  
 from core.dsu import DSU   
 from core.board import Board  
 from core.config import config  
+from analysis.frontier.component import Component
+from analysis.frontier.constraint import Constraint
 
 import logging
 
 from core.utility import rc_to_gid 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
-   
-
-@dataclass
-class Constraint:
-    mask_local: int         # bitmask over local unknown indices 0..k-1
-    mask_global: int 
-    remaining: int          # how many mines among bits set in mask
-    def __repr__(self): 
-        return f"Constraint(mask_local={bin(self.mask_local)}, mask_global={self.mask_global}, remaining={self.remaining})"
- 
-
-@dataclass
-class Component:
-    k: int                               # number of local unknowns
-    constraints: List[Constraint]        # constraints for this component
-    local_to_global: List[int]           # len == k, each is a global cell id 
-    prob: int = -1                       # number of maybe mines for render_heatmap 
-
-    def local_coord(self, i: int, cols: int) -> Tuple[int, int]:
-        gid = self.local_to_global[i]
-        return divmod(gid, cols)
     
   
  
