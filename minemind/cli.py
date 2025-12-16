@@ -6,7 +6,7 @@ from typing import List
  
 from core.snapshot import save_snapshot, load_snapshot
 from core.config import config
-from analysis.rules.move import Move, Action, MoveKind
+from analysis.rules.move import Move
 from minemind.game import Game
 
 
@@ -71,9 +71,9 @@ def cmd_help(g: Game, args=None):
         "  chords                                   # find and list all chord-able cells\n"
         "  undo                                     # undo the last move (even if losing)\n"
         "  verify                                   # check placement of existing flags\n"
-        "  hint [--verbose]                         # deterministic hints + reasons\n" 
+        "  hint [--guess] [--verbose]               # hints and reasons\n" 
         "  step [--guess] [--verbose]               # make one automatic move\n"
-        "  auto [--guess] [--limit N] [--verbose]   # multiple automatic moves\n"
+        "  auto [--guess] [--limit N] [--force] [--verbose]   # multiple automatic moves\n"
         "  prob [--verbose]                         # probability heatmap / listing\n"
         "  count                                    # count number of flags vs mines vs unknowns\n"
         "  frontier [--global] [--local]            # show frontier components\n"
@@ -124,11 +124,17 @@ def cmd_new(g: Game, args):
             ns.width = 30 
             ns.height = 16 
             ns.mines = 99 
-        else: 
+        elif ns.beginner: 
             print("Beginner Board")
             ns.width = 9 
             ns.height = 9 
             ns.mines = 10 
+        else: 
+            print("Expert Board")
+            ns.width = 30 
+            ns.height = 16 
+            ns.mines = 99 
+
     else: 
         if ns.height < 1: 
             print("height must be >= 1")
@@ -172,7 +178,10 @@ def _print_moves(moves, verbose=False):
 
     def first_reason(m):
         return m.reasons[0] if getattr(m, "reasons", None) else ""
-
+ 
+    if isinstance(moves, list) and len(moves) == 1: 
+        moves = moves[0] 
+    
     if isinstance(moves, Move):
         m = moves
         if verbose:
@@ -341,10 +350,7 @@ def cmd_undo(g: Game, args=None):
     #     print("use 'new ...' or 'load ...' to start a new game.\n")
 
 
-def cmd_verify(g: Game, args=None):
-    if not g.validate_board():
-        return
-
+def cmd_verify(g: Game, args=None): 
     try:
         messages = g.solver.verify()
         if not messages:
@@ -361,25 +367,30 @@ def cmd_verify(g: Game, args=None):
 
 
 def cmd_hint(g: Game, args=None):
-    if not g.validate_board():
-        return
-
     parser = argparse.ArgumentParser(prog="hint", add_help=False)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--guess", action="store_true")
     try:
-        ns = parser.parse_args(args)
+        ns = parser.parse_args(args or [])
     except SystemExit:
         return
-    
+
     try:
-        move = g.hint()
-        if not move:
-            print("no deterministic move found. try command `prob`.\n")
-            return  
-        _print_moves(move, ns.verbose)
+        moves = g.hint(guess=ns.guess)   # <- make hint return list[Move]
+        
+        if not moves:
+            msg = "no deterministic move found."
+            if not ns.guess:
+                msg += " try `hint --guess` (or `prob`)."
+            print(msg + "\n")
+            return
+
+        _print_moves(moves, ns.verbose)
+
     except AssertionError as e:
-        g.render_board() 
-        print(e)  
+        g.render_board()
+        print(e)
+
 
 
 def cmd_step(g: Game, args):
@@ -395,7 +406,7 @@ def cmd_step(g: Game, args):
         return
 
     try: 
-        move = g.step(ns.guess)
+        move, cs = g.step(ns.guess)
 
         if not move:
             msg = "no move found."
@@ -407,7 +418,7 @@ def cmd_step(g: Game, args):
         _print_moves(move, ns.verbose)
     
         g.render_board()
-        g.is_winner(move.game_over, move.win)
+        g.is_winner(cs.game_over, cs.win)
     except AssertionError as e:
         g.render_board() 
         print(e)  
@@ -421,6 +432,7 @@ def cmd_auto(g: Game, args):
     parser.add_argument("--guess", action="store_true") 
     parser.add_argument("--limit", type=int)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--force", action="store_true")
     try:
         ns = parser.parse_args(args)
     except SystemExit:
@@ -429,21 +441,32 @@ def cmd_auto(g: Game, args):
     if ns.limit is not None and ns.limit <= 0:
         print("limit must be a positive number\n")
         return
+    
+    if ns.force and not ns.guess: 
+        print("** forcing is not necessary without guessing **\n")
 
     try:
-        moves = g.auto(ns.guess, ns.limit)
-    
-        if not moves:
-            msg = "no moves found."
+        moves, cs, conflicts = g.auto(ns.guess, ns.limit, ns.force)
+        
+        if len(moves) > 0: 
+            _print_moves(moves, ns.verbose)
+        else:
+            msg = "no moves found. "
             if not ns.guess:
-                msg += " try `auto --guess`."
+                msg += "try `auto --guess`"
+            else: 
+                msg += "try `auto --guess --force`"
             print(msg + "\n")
             return 
 
-        _print_moves(moves, ns.verbose)
+        if len(conflicts) > 0: 
+            print("** conflicts found, cannot continue auto ** ")
+            for (r,c) in conflicts: 
+                print(f"conflicts: r={r},c={c}") 
+            print()      
 
         g.render_board()
-        g.is_winner(moves.game_over, moves.win)
+        g.is_winner(cs.game_over, cs.win)
     except AssertionError as e:
         g.render_board() 
         print(e)  

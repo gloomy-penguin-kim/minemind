@@ -16,6 +16,7 @@ import logging
 
 from core.utility import rc_to_gid 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)
    
 
 @dataclass

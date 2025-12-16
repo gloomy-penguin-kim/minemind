@@ -2,34 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import IntEnum
-from typing import Tuple, Optional
-
-from core.changes import Action
-
-
-class MoveKind(IntEnum):
-    UNKNOWN = -1 
-    SAFE  = 0
-    MINE  = 1
-    OPEN  = 2
-    CHORD = 3
-    FLAG  = 4
-    STEP  = 5
-    AUTO  = 6
-    GUESS = 7
-
-
-KIND_NAMES = {
-    MoveKind.SAFE:  "safe",
-    MoveKind.MINE:  "mine",
-    MoveKind.OPEN:  "open",
-    MoveKind.FLAG:  "flag",
-    MoveKind.STEP:  "step",
-    MoveKind.AUTO:  "auto",
-    MoveKind.CHORD: "chord",
-    MoveKind.GUESS: "guess",
-}
+from typing import Any, Tuple, Optional
+from core.constants import Action, KIND_NAMES
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +15,7 @@ class Move:
     action: Action
 
     # What CLI will *say* this move is (origin/label)
-    kind: MoveKind = MoveKind.STEP
+    kind: Optional[Action] = Action.OPEN 
 
     # Human explanations
     reasons: Tuple[str, ...] = field(default_factory=tuple)
@@ -49,21 +23,21 @@ class Move:
     # Optional ranking (probability, etc.)
     score: Optional[float] = None
 
+    # Optional ranking (probability, etc.)
+    val: Optional[Any] = None
+
     def __str__(self) -> str:
-        name = KIND_NAMES.get(self.kind, "unknown")
-        return f"{name}: r={self.r},c={self.c}"
+        action = KIND_NAMES.get(self.action, "unknown")
+        kind   = KIND_NAMES.get(self.kind, "unknown")
+        t = f"- {kind}" if self.kind else ""  
+        colon = ":" if len(self.reasons) > 0 else "" 
+        return f"{action}: r={self.r},c={self.c} {t}{colon}"
 
     def __repr__(self) -> str:
         name = KIND_NAMES.get(self.kind, "unknown")
         extra = f", reasons={list(self.reasons)!r}" if self.reasons else ""
         return f"Move({name}, r={self.r},c={self.c}{extra})"
-
-    def var(self):
-        # keep your old call sites working
-        # note: "reason" used to be a single string; now it's tuple[str,...]
-        reason = self.reasons[0] if self.reasons else None
-        return self.r, self.c, int(self.kind), reason
-
+ 
 
 class MoveList:
     def __init__(self, one=False):

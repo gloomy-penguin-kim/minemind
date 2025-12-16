@@ -31,10 +31,9 @@ from analysis.rules.move import Move
 from core.changes import ChangeSet
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class HistoryEntry:
-    move: Move | None          # None for initial state
-    changes: ChangeSet
+    moves: tuple[Move, ...]          # batch (len 1 for normal actions)
+    changes: ChangeSet              # combined changeset for the whole batch
     move_count_before: int
-    note: str 
- 
+    note: str = ""

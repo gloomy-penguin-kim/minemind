@@ -1,8 +1,8 @@
 
 
 from typing import List
-from analysis.rules.move import Move, MoveKind, MoveList
-from core.changes import Action
+from analysis.rules.move import Move, MoveList
+from core.constants import Action
 from core.utility import get_indicies_from_bitmask
 from analysis.frontier.component import Component
 
@@ -72,7 +72,7 @@ def _apply_subset(
                         moves=moves, 
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
-                        kind=MoveKind.SAFE, 
+                        action=Action.OPEN, 
                         reasons=s
                     )
                     if stop_after_one and len(moves) > 1:
@@ -89,7 +89,7 @@ def _apply_subset(
                         moves=moves, 
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
-                        kind=MoveKind.MINE, 
+                        action=Action.FLAG, 
                         reasons=s
                     ) 
                     if stop_after_one and len(moves) > 1:
@@ -114,7 +114,7 @@ def _apply_subset(
                         moves=moves, 
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
-                        kind=MoveKind.SAFE, 
+                        action=Action.OPEN, 
                         reasons=s
                     )
                     if stop_after_one and len(moves) > 1:
@@ -128,7 +128,7 @@ def _apply_subset(
                         moves=moves, 
                         local_to_global=comp.local_to_global, 
                         mask=diff, 
-                        kind=MoveKind.MINE, 
+                        action=Action.FLAG, 
                         reasons=s
                     )
                     if stop_after_one and len(moves) > 1:
@@ -142,8 +142,8 @@ def _process_moves_for_this_mask(
     board, 
     moves: MoveList, 
     mask: int,
-    kind: int,
-    reason: List[str]
+    action: int,
+    reasons: List[str]
 ):  
     cols = board.cols 
     
@@ -157,13 +157,14 @@ def _process_moves_for_this_mask(
         # (shouldn't happen but would be sad if it did)
         if board.revealed[r][c] or board.flagged[r][c]:
             continue  
-        
-        a = Action.OPEN if kind == MoveKind.OPEN else Action.FLAG 
+         
+        val = True if action == Action.FLAG else None 
         
         move = Move(r, c, 
-                    action=a, 
-                    kind=kind, 
-                    reason=reason, 
+                    action=action, 
+                    kind=Action.RULE, 
+                    val=val, 
+                    reasons=reasons, 
                     score=None)
         moves.add_move(move)  
 

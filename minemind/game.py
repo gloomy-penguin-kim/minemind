@@ -1,7 +1,8 @@
 from typing import List
 from analysis.rules.move import Move
 from core.board import Board
-from core.changes import Action, ChangeSet
+from core.changes import ChangeSet
+from core.constants import Action 
 from minemind.historyentry import HistoryEntry
 from solver.solver import Solver
 from minemind.timer import Timer
@@ -18,17 +19,9 @@ class Game:
         self.max_k = 30   
         self.moves = 0 
         self.history: List[HistoryEntry] = [] 
-
-    def apply_move(self, move: Move):
-        cs = self.board.apply(move.action, move.r, move.c)
-        print("here",cs) 
-        self.moves += 1
-        print("here",cs) 
-        self.history.push(move, cs)
-        return cs
-     
+ 
     def open(self, r: int, c: int): 
-        if self.board.game_over: return False 
+        if self.board.game_over: return False  
         return self.apply_action(Action.OPEN, r, c, note=f"OPEN {r},{c}")
 
     def flag(self, r: int, c: int):
@@ -47,36 +40,50 @@ class Game:
         if not self.validate_board(): return False 
         return self.solver.verify()  
     
-    def hint(self): 
+    def hint(self, guess=False): 
         if not self.validate_board(): return False 
-        return self.solver.hint() 
-    
+        return self.solver.hint(guess) 
+
     def step(self, guess=False): 
         if not self.validate_board(): return False 
-        return self.solver.step(guess=guess) 
+        move, cs = self.solver.step(guess) 
+        if move: self.update_to_history([move], cs, 1, note=f"STEP {move.r},{move.c}")
+        return move, cs 
     
-    def auto(self, guess=False, limit=None): 
-        if not self.validate_board(): return False 
-        return self.solver.auto(guess=guess, limit=limit) 
+    def auto(self, guess=False, limit=None, force=False): 
+        if not self.validate_board(): return [], ChangeSet()  
+        moves, cs, conflicts = self.solver.auto(guess=guess, limit=limit, force=force)   
+        self.update_to_history(moves, cs, move_count=len(moves)) 
+        return moves, cs, conflicts
 
     def apply_action(self, action: Action, r: int, c: int, note: str = ""):
         move = Move(r=r, c=c, action=action, kind=None, reasons=())  # kind optional
+        print("apply before ")
         cs = self.board.apply(action, r, c)
+        print("apply after ", cs)
 
-        self.history.append(HistoryEntry(move=move, 
+        self.history.append(HistoryEntry(moves=[move], 
                                          changes=cs, 
                                          move_count_before=self.moves, 
                                          note=note))
         self.moves += 1
         return cs
+    
 
+    def update_to_history(self, moves: List[Move], cs: ChangeSet, move_count=1, note: str = ""): 
+        self.history.append(HistoryEntry(moves=moves, 
+                                         changes=cs, 
+                                         move_count_before=self.moves, 
+                                         note=note))
+        self.moves += move_count  
 
+    
 
 
     def set_k_max(self, k) -> None: 
         self.max_k = k 
         if self.solver: 
-            self.solver.max_k = k  
+            self.solver.set_max_k(k)  
 
 
     def new(self, rows, cols, mines, seed=None):

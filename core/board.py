@@ -1,6 +1,6 @@
 from typing import List, Tuple, Iterable, Any
 
-from core.changes import ChangeSet, Action 
+from core.changes import ChangeSet 
 from core.generator import generate_board
 from core.config import config 
 
@@ -9,7 +9,8 @@ from typing import Set, Tuple
 
 import logging
 
-from analysis.rules.move import MoveKind, Move
+from analysis.rules.move import Move
+from core.constants import Action
 
 # logger = logging.getLogger(__name__) 
 
@@ -66,7 +67,7 @@ class Board:
         self.mines_placed = True
 
 
-    def apply(self, action: Action, r: int, c: int) -> ChangeSet:
+    def apply(self, action: Action, r: int, c: int, val: bool | None = None) -> ChangeSet:
         """
         The only place that mutates board state.
         """
@@ -80,11 +81,14 @@ class Board:
                     before_revealed.add((i, j))
                 if self.flagged[i][j]:
                     before_flagged.add((i, j))
-
-        if action == Action.OPEN:
-            self.reveal_cell(r, c)
+ 
+        if action == Action.OPEN: 
+            self.reveal_cell(r, c) 
         elif action == Action.FLAG:
-            self.toggle_flag(r, c)
+            if val is not None: 
+                self.set_flag(r, c, val) 
+            else: 
+                self.toggle_flag(r, c)
         elif action == Action.CHORD:
             self.chord(r, c)
 
@@ -203,7 +207,6 @@ class Board:
         ) 
 
 
-
     def toggle_flag(self, r: int, c: int) -> ChangeSet: 
 
         if self.game_over or self.revealed[r][c]:
@@ -226,8 +229,34 @@ class Board:
             flagged=flagged | win_cs.flagged,
             game_over=win_cs.game_over,
             win=win_cs.win,
-        )
-        return cs 
+        ) 
+
+
+    def set_flag(self, r: int, c: int, flag: bool) -> ChangeSet: 
+
+        if self.game_over or self.revealed[r][c]:
+            return ChangeSet(
+                revealed=set(),
+                flagged=set(),
+                game_over=self.game_over,
+                win=self.win,
+            )   
+        
+        flagged = set() 
+
+        if self.flagged[r][c] != flag: 
+            self.flagged[r][c] = flag
+            flagged.add((r,c)) 
+
+        # merge in win-condition changes (auto-flagging)
+        win_cs = self._check_win_condition() 
+
+        return ChangeSet(
+            revealed=set(),
+            flagged=flagged | win_cs.flagged,
+            game_over=win_cs.game_over,
+            win=win_cs.win,
+        ) 
     
 
     def chord(self, r: int, c: int) -> ChangeSet:

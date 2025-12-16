@@ -1,6 +1,7 @@
 
 # this is for rule number 1 
-from analysis.rules.move import Action, Move, MoveList, MoveKind
+from analysis.rules.move import Move, MoveList
+from core.constants import Action 
 from core.utility import get_indicies_from_bitmask
 from core_bkup.frontier import Component 
 
@@ -37,8 +38,8 @@ def _apply_singles(
                 move = Move(r=r, 
                             c=c, 
                             action=Action.OPEN, 
-                            kind=MoveKind.SAFE, 
-                            reasons=("Singles: remaining == 0 are SAFE"), 
+                            kind=Action.RULE, 
+                            reasons=("Singles: remaining == 0 are SAFE",), 
                             score=None)
                 moves.add_move(move)
                 if stop_after_one: return 
@@ -57,7 +58,8 @@ def _apply_singles(
                 move = Move(r=r, 
                             c=c, 
                             action=Action.FLAG,
-                            kind=MoveKind.MINE, 
+                            kind=Action.RULE, 
+                            val=True, 
                             reasons=s, 
                             score=None) 
                 moves.add_move(move)

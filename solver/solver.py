@@ -14,21 +14,25 @@ from heapq import heappop, heappush
 from typing import Dict, List, Tuple, Any
 
 from analysis.frontier.frontier import build_frontier
-from analysis.probability.enumeration import ProbabilityEngine 
-from analysis.probability.guess import best_guess
+from analysis.probability.auto import guess_moves_for_auto
+from analysis.probability.enumeration import ProbabilityEngine, build_guess_heap  
+from analysis.probability.guess import GuessItem, guessitem_to_move, pop_candidates, select_hint_guess_list
 from analysis.rules.rules import apply_rules
 from analysis.queries.chords import find_chords 
-from core.changes import Action, ChangeSet
+from core.changes import ChangeSet
+from core.constants import Action 
 from core.lru import LRUCache
 from core.signatures import Signature, component_signature
-from analysis.rules.move import MoveKind, Move
+from analysis.rules.move import Move
 from core.utility import get_indicies_from_bitmask 
 from core.config import config 
 
-import logging
-import copy
+import logging 
 
-logger = logging.getLogger(__name__) 
+from core_bkup.move import MINE, SAFE
+ 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 # Input: Board, build_frontier, rules, signatures, lru
@@ -58,6 +62,14 @@ class Solver:
         self.refresh_frontier()   
 
 
+    def set_max_k(self, k:int):
+        self.prob_engine.max_k = k 
+
+
+    def get_max_k(self):
+        return self.prob_engine.max_k
+
+
     # these handle when the board is modified and becomes dirty  
     def refresh_frontier(self):
         """call this for ditry birds"""  
@@ -67,7 +79,8 @@ class Solver:
     def open(self, r, c): 
         """
         cli command for open 
-        """
+        """ 
+        print("solver")
         return self.board.apply(Action.OPEN, r, c)  
 
 
@@ -89,23 +102,26 @@ class Solver:
         return find_chords(self.board)
     
  
-    def step(self, guess=False):
+    def step(self, guess=False, force=False):
         """
         Perform a single logical step.
         If guess=True and no deterministic move exists, make one guess.
         """ 
         comps = build_frontier(self.board)
-        move  = apply_rules(comps, self.board, stop_after_one=True)
+        move, conflicts  = apply_rules(comps, self.board, stop_after_one=True)
 
         if move:
-            return self.board.apply(move.action, move.r, move.c)
+            return move, self.board.apply(move.action, move.r, move.c)
         
         if guess:
-            g = best_guess(self.board, comps)
-            if g:
-                return self.board.apply(g.action, g.r, g.c)
+            all_probs, _ = self.prob() 
+            moves, det = guess_moves_for_auto(all_probs, self.board.rows, self.board.cols) 
             
-        return None
+            if moves:
+                move = moves[0] if len(moves) > 0 else moves
+                return move, self.board.apply(move.action, move.r, move.c)
+            
+        return None, ChangeSet() 
 
 
     def verify(self):
@@ -121,20 +137,20 @@ class Solver:
         Prefer deterministic rules; fall back to probability-based guess.
         """
         comps = build_frontier(self.board)
-        move  = apply_rules(comps, self.board, stop_after_one=True)
+        move, _ = apply_rules(comps, self.board, stop_after_one=True)
          
         if move:
-            return move 
+            return [move]
         
         if guess:
-            g = best_guess(self.board, comps)
-            if g:
-                return g 
+            all_probs, _ = self.prob()  # keep using your existing prob()
+            moves,det = guess_moves_for_auto(all_probs, self.board.rows, self.board.cols) 
+            return moves 
             
-        return None 
+        return []     
 
 
-    def auto(self, guess: bool=False, limit: int | None = None):
+    def auto(self, guess: bool=False, limit: int | None = None, force: bool=False):
         """
         auto [--guess] [--limit N]
         - run deterministic steps + exact enumeration
@@ -143,76 +159,123 @@ class Solver:
         """ 
 
         if not self.verify_board(): 
-            return None 
+            return [], ChangeSet()
         
         logger.debug("guess = %s, limit = %s", guess, limit)
-
-        all_moves = []
-        effected_cells = []  
  
-        while True: 
+
+        all_moves: List[Move] = [] 
+        all_cs = ChangeSet() 
+        conflicts = [] 
+
+        def can_continue() -> bool:
+            if self.board.game_over:
+                return False
             if limit is not None and len(all_moves) >= limit:
-                break
+                return False
+            return True 
+        
  
-            if not self.verify_board(): 
-                break 
+        while can_continue():   
+            
+            modified = False 
 
-            # Rebuild frontier for current board
-            self.refresh_frontier()              
-            moved = False
+            self.refresh_frontier()      
+ 
+            moves,conflicts = apply_rules(self.frontier_components, 
+                                            self.board, 
+                                            stop_after_one=False)  
+            if len(conflicts) > 0: 
+                return [], ChangeSet(), conflicts 
 
-            # 1) Deterministic moves (Singles, Subset, etc) on all components
-            for comp in self.frontier_components: 
+            # Respect the limit: trim moves if needed
+            if limit is not None:
+                remaining_steps = limit - len(all_moves)
+                if len(moves) > remaining_steps:
+                    moves = moves[:remaining_steps] 
 
-                if limit is not None and len(all_moves) >= limit:
-                    break
+            logger.debug("moves: %s, %s", limit, moves)
+            # stop if there are rule conflicts 
+            if moves:    
 
-                # apply_rules returns list[(r, c, kind, reason)]
-                moves = apply_rules(self.frontier_components, 
-                                    self.board, 
-                                    stop_after_one=False)
+                for move in moves:
+                    
+                    if not can_continue(): break  
 
-                if not moves:
-                    continue
+                    flag = True if move.action == Action.FLAG else None 
+                    cs = self.board.apply(move.action, move.r, move.c, flag)  
+                    
+                    if not cs.empty:  
+                        modified = True 
+                        all_cs = all_cs.merged(cs) 
+                        all_moves.append(move)  
 
-                # Respect the limit: trim moves if needed
-                if limit is not None:
-                    remaining_steps = limit - len(all_moves)
-                    if len(moves) > remaining_steps:
-                        moves = moves[:remaining_steps] 
+            if modified: continue 
 
-                if moves:   
-                    for move in moves:
-                        return self.board.apply(move.action, move.r, move.c) 
-                    self.refresh_frontier()        
-
-            # If we made at least one deterministic move, loop around again
-            if moved:
-                continue
-
-            if not guess:
-                # guessing not allowed 
-                break
+            if not can_continue(): break 
+ 
+            if not guess: break
 
             # 2) Guessing mode: use probabilities to pick lowest-risk unknown 
-            guesses, guess_effected_cells = self._heap(apply=True) 
+            all_probs, _ = self.prob() 
+            moves, det = guess_moves_for_auto(all_probs, self.board.rows, self.board.cols) 
 
-            if len(guesses) == 0: 
-                break
+            if limit is not None:
+                remaining_steps = limit - len(all_moves)
+                if len(moves) > remaining_steps:
+                    moves = moves[:remaining_steps] 
+                    
+            if det or force: 
+                applied_moves, applied_cs = self._apply_moves(moves) 
+                if not applied_cs.empty: 
+                    modified = True 
+                    all_moves += applied_moves
+                    all_cs = all_cs.merged(applied_cs)
 
-            all_moves.extend(guesses)   
-            effected_cells.extend(guess_effected_cells) 
- 
-            if not self.verify_board(): 
+            if not modified: 
                 break 
+            
+ 
+        return all_moves, all_cs, conflicts  
 
-        if len(effected_cells) > 0:      
-            l = max(1, len(all_moves))  
-            self.verify_and_history(moves=effected_cells, 
-                                    note=f"AUTO for {l} moves\n",
-                                    count=l) 
-        return all_moves
-                      
+
+    def _heap(self, apply: bool = True):
+        all_probs, _ = self.prob()     # or engine.compute_probabilities(...)
+        if not all_probs:
+            return [], []
+
+        heap = build_guess_heap(all_probs, self.board.rows, self.board.cols)
+
+        skip = lambda r, c: self.board.revealed[r][c] or self.board.flagged[r][c]
+
+        # If apply=True: we only need ONE candidate (best-rated).
+        # If apply=False: return candidates until we find the first "safe" (<50% mine)
+        candidates = pop_candidates(
+            heap,
+            skip=skip,
+            stop_after_safe=(not apply),
+            limit=(1 if apply else None),
+        )
+
+        moves = [] 
+
+        for item in candidates:
+            mine_probability_percent = item.p_mine * 100.0
+
+            if item.p_mine < 0.5:
+                mv = Move(item.r, item.c, SAFE, [f"GUESS - mine probability: {mine_probability_percent:6.2f}%"])
+            else:
+                mv = Move(item.r, item.c, MINE, [f"GUESS - mine probability: {mine_probability_percent:6.2f}%"])
+
+            if apply:
+                ec = self._apply_move(mv)
+                if ec: 
+                    moves.append(mv) 
+            else:
+                moves.append(mv)
+
+        return moves
+    
 
     def prob(self) -> Tuple[Dict[Tuple[int, int], float], List[Tuple[float, int, float, float, Tuple[int, int]]]]:
         self.refresh_frontier() 
@@ -264,18 +327,22 @@ class Solver:
 
     def _apply_moves(self, moves: List[Move]): 
         logger.debug("_apply_moves %s", moves) 
-        effected_cells = [] 
         applied_moves = [] 
+        applied_cs = ChangeSet() 
         for move in moves:
-            ec = self._apply_move(move)  
-            if len(ec) > 0: 
-                effected_cells.extend(ec) 
+            cs = self._apply_move(move)  
+            if not cs.empty: 
+                applied_cs = applied_cs.merged(cs) 
                 applied_moves.append(move) 
-        return applied_moves, effected_cells 
+                if applied_cs.win or applied_cs.game_over: 
+                    break 
+        logger.debug("applied_moves %s",applied_moves)
+        logger.debug("applied_cs %s",applied_cs)
+        return applied_moves, applied_cs
 
 
     def _apply_move(self, move: Move): 
-        return self.board.apply(move.action, move.r, move.c)
+        return self.board.apply(move.action, move.r, move.c, move.val)
     
   
     def verify_board(self): 

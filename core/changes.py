@@ -1,30 +1,32 @@
 # core/changes.py
-from dataclasses import dataclass, field
-from enum import Enum, auto
-from typing import Set, Tuple
+from dataclasses import dataclass, field 
+from typing import Tuple
 
 Coord = Tuple[int, int]
 
-class Action(Enum):
-    OPEN = auto()
-    FLAG = auto()
-    CHORD = auto() 
 
 @dataclass(frozen=True)
 class ChangeSet:
-    revealed: Set[Coord] = field(default_factory=set)
-    flagged: Set[Coord] = field(default_factory=set)
+    revealed: frozenset[Coord] = field(default_factory=set)
+    flagged: frozenset[Coord] = field(default_factory=set)
     game_over: bool = False
     win: bool = False
 
     @property
     def empty(self) -> bool:
-        return not self.revealed and not self.flagged and not self.game_over
+        return len(self.revealed) == 0 and len(self.flagged) == 0 and not self.game_over
         
     def __bool__(self) -> bool:
         # Always consider it a "valid result"
         return True
 
+    def merged(self, other: "ChangeSet") -> "ChangeSet":
+        return ChangeSet(
+            revealed=self.revealed | other.revealed,
+            flagged=self.flagged | other.flagged,
+            game_over=other.game_over,
+            win=other.win,
+        )
 
 @dataclass
 class Delta:
