@@ -19,7 +19,7 @@ class GuessItem:
     r: int
     c: int 
 
-def guess_moves_for_auto(all_probs: dict[tuple[int,int], float], rows: int, cols: int) -> tuple[list[Move], bool]:
+def guess_moves_for_autobot(all_probs: dict[tuple[int,int], float], rows: int, cols: int) -> tuple[list[Move], bool]:
     """
     Returns (moves).
     - If there are sure moves: returns ALL sure-safe opens (and optionally sure-mine flags)

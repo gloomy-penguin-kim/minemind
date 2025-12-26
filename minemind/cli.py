@@ -1,6 +1,5 @@
 # minemind/cli.py
 
-import readline
 import shlex
 import argparse
 from typing import List
@@ -134,7 +133,7 @@ def cmd_new(g: Game, args):
             print("Expert Board")
             ns.width = 30 
             ns.height = 16 
-            ns.mines = 99 
+            ns.mines = 140 
 
     else: 
         if ns.height < 1: 

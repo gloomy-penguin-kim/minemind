@@ -1,8 +1,9 @@
 import pytest
 
 from analysis.rules.move import MoveList
-from analysis.rules.equivalence import _apply_equivalence  # <- adjust import path
-from analysis.frontier.component import Component, Constraint  # <- adjust if needed
+from analysis.rules.equivalence import _apply_equivalence   
+from analysis.frontier.component import Component  
+from analysis.frontier.constraint import Constraint 
 from core.constants import Action
 
 
@@ -41,7 +42,7 @@ def test_apply_equivalence_subset_equal_remaining_marks_diff_safe_open():
     _apply_equivalence(comp, board, moves, stop_after_one=False)
 
     arr, conflicts = moves.get_arrays()
-    assert conflicts == []
+    assert len(conflicts) == 0 
 
     # Expect exactly one move: OPEN (0,1)
     assert len(arr) == 1
@@ -75,7 +76,7 @@ def test_apply_equivalence_skips_already_revealed_or_flagged_cells():
     _apply_equivalence(comp, board, moves, stop_after_one=False)
 
     arr, conflicts = moves.get_arrays()
-    assert conflicts == []
+    assert len(conflicts) == 0
     assert arr == []
 
 
@@ -98,7 +99,7 @@ def test_apply_equivalence_no_moves_when_remaining_not_equal():
     _apply_equivalence(comp, board, moves, stop_after_one=False)
 
     arr, conflicts = moves.get_arrays()
-    assert conflicts == []
+    assert len(conflicts) == 0
     assert arr == []
 
 
@@ -128,7 +129,7 @@ def test_apply_equivalence_stop_after_one_returns_after_first_add():
     _apply_equivalence(comp, board, moves, stop_after_one=True)
 
     arr, conflicts = moves.get_arrays()
-    assert conflicts == []
+    assert len(conflicts) == 0
     assert len(arr) == 1
     assert (arr[0].r, arr[0].c) in {(0, 1), (0, 2)}  # whichever it hits first
     assert arr[0].action == Action.OPEN

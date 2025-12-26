@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from heapq import heappush
 from typing import Dict, List, Tuple, Callable
-
-from analysis.probability.auto import guess_moves_for_auto
+ 
+from core.config import Config
 from core.lru import LRUCache
 from core.signatures import component_signature
 
@@ -71,8 +71,9 @@ def enumerate_component(comp) -> ProbResult:
 def probs_for_component(
     comp,
     res: ProbResult,
-    cols: int,
+    cols,
     skip_pred: Callable[[int, int], bool],
+    board=None
 ) -> Dict[Tuple[int, int], float]:
     if res.solutions == 0:
         return {}
@@ -83,7 +84,27 @@ def probs_for_component(
         if skip_pred(r, c):
             continue
         out[(r, c)] = res.mine_counts[i] / res.solutions
+
+        test_invariantes_of_the_mines(board, out[(r,c)], r, c, comp)
     return out
+
+
+def test_invariantes_of_the_mines(board, p, r, c, comp): 
+    config = Config() 
+    if config.invariants and board:  
+        mines_in_comp = board.test_get_remaining_mines_per_component(comp.local_to_global)
+        if board.revealed[r][c] or board.flagged[r][c]:
+            raise AssertionError(f"probability assigned to revealed or flagged location for r={r},c={c},p={p}\n")
+        if p == 0.0 and board.is_mine[r][c]:
+            raise AssertionError(f"conflict in probability found at cell r={r},c={c},p={p}\n")
+        if p == 1.0 and not board.is_mine[r][c]:
+            raise AssertionError(f"conflict in probability found at cell r={r},c={c},p={p}\n") 
+        if mines_in_comp == 0 and p > 0.0:
+            raise AssertionError(f"zero mines in component, greather than 0 mine prob: r={r},c={c},p={p}")
+        if mines_in_comp == comp.k and p < 1.0:
+            raise AssertionError(f"all mines in component, less than 1 mine prob: r={r},c={c},p={p}")
+        if not(0.0 <= p <= 1.0):
+            raise AssertionError(f"mine probablity out of range (0.0..1.0): r={r},c={c},p={p}")
 
 
 def build_guess_heap(all_probs: Dict[Tuple[int, int], float], rows: int, cols: int):
@@ -123,6 +144,6 @@ class ProbabilityEngine:
             res = self.get_component_result(comp)
             if res is None:
                 continue
-            all_probs.update(probs_for_component(comp, res, board.cols, skip))
+            all_probs.update(probs_for_component(comp, res, board.cols, skip, board))
 
         return all_probs 

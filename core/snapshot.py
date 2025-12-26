@@ -7,7 +7,6 @@ from datetime import datetime
 from core.board import Board 
 from solver.solver import Solver 
 from minemind.timer import Timer 
-from minemind.render import render_board
 
 def save_snapshot(g, filename): 
     dirname = os.path.dirname(filename) 
@@ -48,7 +47,7 @@ def _load_from_json(g, json_str: str):
     g.board = _create_board_from_object(obj) 
 
     g.solver = Solver(g.board) 
-    g.solver.moves = obj["moves"]
+    g.moves = obj["moves"]
 
     created_dt = datetime.fromtimestamp(obj['timer']['created_dt'])
     saved_dt = datetime.fromtimestamp(obj['timer']['elapsed_seconds'])
@@ -81,8 +80,7 @@ def _create_board_from_object(obj):
 
 
 def _board_to_object(g):
-    board = g.board 
-    solver = g.solver 
+    board = g.board  
     timer = g.timer 
     return {
         "rows": board.rows, 
@@ -96,7 +94,7 @@ def _board_to_object(g):
         "mines_placed": board.mines_placed, 
         "game_over": board.game_over, 
         "win": board.win,  
-        "moves": solver.moves,
+        "moves": g.moves,
         "timer": { 
             "created_dt": timer.created_dt.timestamp(),
             "elapsed_seconds": timer.get_elapsed_seconds(), 

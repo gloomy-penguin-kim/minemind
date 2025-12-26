@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 
 from analysis.frontier.frontier import build_frontier
-from analysis.probability.auto import guess_moves_for_auto
+from analysis.probability.auto import guess_moves_for_autobot
 from analysis.probability.enumeration import ProbabilityEngine, build_guess_heap
 from analysis.rules.rules import apply_rules
 from analysis.queries.chords import find_chords 
@@ -115,7 +115,7 @@ class Solver:
         if guess:
             self.refresh_frontier()
             all_probs, _ = self.prob() 
-            moves, det = guess_moves_for_auto(all_probs, self.board.rows, self.board.cols) 
+            moves, det = guess_moves_for_autobot(all_probs, self.board.rows, self.board.cols) 
             
             if moves:
                 if det or force: 
@@ -146,7 +146,7 @@ class Solver:
         if guess:
             self.refresh_frontier()      
             all_probs, _ = self.prob()  # keep using your existing prob()
-            moves, det = guess_moves_for_auto(all_probs, self.board.rows, self.board.cols) 
+            moves, det = guess_moves_for_autobot(all_probs, self.board.rows, self.board.cols) 
             if det: 
                 return moves, conflicts 
             
@@ -210,7 +210,7 @@ class Solver:
 
             # 2) Guessing mode: use probabilities to pick lowest-risk unknown 
             all_probs, _ = self.prob() 
-            moves, det = guess_moves_for_auto(all_probs, self.board.rows, self.board.cols) 
+            moves, det = guess_moves_for_autobot(all_probs, self.board.rows, self.board.cols) 
 
             if limit is not None:
                 remaining_steps = limit - len(all_moves)
@@ -279,8 +279,7 @@ class Solver:
         return conflicts
 
 
-    def _apply_moves(self, moves: List[Move]): 
-        logger.debug("_apply_moves %s", moves) 
+    def _apply_moves(self, moves: List[Move]):  
         applied_moves = [] 
         applied_cs = ChangeSet() 
         self.frontier_dirty = True 
@@ -290,16 +289,9 @@ class Solver:
                 applied_cs = applied_cs.merged(cs) 
                 applied_moves.append(move) 
                 if applied_cs.win or applied_cs.game_over: 
-                    break 
-        logger.debug("applied_moves %s",applied_moves)
-        logger.debug("applied_cs %s",applied_cs)
+                    break  
         self.refresh_frontier() 
-        return applied_moves, applied_cs
-
-
-    # def _apply_move(self, move: Move): 
-    #     self.frontier_dirty = True 
-    #     return self.board.apply(move.action, move.r, move.c, move.val)
+        return applied_moves, applied_cs 
 
 
     def _apply(self, action:Action, r:int, c:int, val:bool|None=None):  
@@ -317,18 +309,4 @@ class Solver:
         return True 
      
     
-    def test_invariantes_of_the_mines(self, mine_probability, mines_in_component, r, c, k): 
-        if config.invariants:  
-            if self.board.revealed[r][c] or self.board.flagged[r][c]:
-                raise AssertionError(f"probability assigned to revealed or flagged location for r={r},c={c},p={mine_probability}\n")
-            if mine_probability == 0.0 and self.board.is_mine[r][c]:
-                raise AssertionError(f"conflict in probability found at cell r={r},c={c},p={mine_probability}\n")
-            if mine_probability == 1.0 and not self.board.is_mine[r][c]:
-                raise AssertionError(f"conflict in probability found at cell r={r},c={c},p={mine_probability}\n") 
-            if mines_in_component == 0 and mine_probability > 0.0:
-                raise AssertionError(f"zero mines in component, greather than 0 mine prob: r={r},c={c},p={mine_probability}")
-            if mines_in_component == k and mine_probability < 1.0:
-                raise AssertionError(f"all mines in component, less than 1 mine prob: r={r},c={c},p={mine_probability}")
-            if not(0.0 <= mine_probability <= 1.0):
-                raise AssertionError(f"mine probablity out of range (0.0..1.0): r={r},c={c},p={mine_probability}")
- 
+   
